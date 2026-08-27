@@ -10,7 +10,6 @@
     "seed": 184321,
     "bounds": [-4.0, 4.0, -2.0, 2.0],
     "z_offset": 0.025,
-    "target_height": 0.34,
     "output_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json"
   },
   "world": {
