@@ -19,6 +19,7 @@ def test_registry_discovers_cat_tv_tools():
     registry.discover("tools")
     assert {tool.name for tool in registry.get_by_capability("prey_motion_generation")} >= {"cat_prey_motion"}
     assert {tool.name for tool in registry.get_by_capability("prey_animation_rendering")} >= {"cat_prey_blender"}
+    assert {tool.name for tool in registry.get_by_capability("cat_tv_world_polish")} >= {"cat_tv_world_polish"}
 
 
 def test_mouse_motion_is_seeded_and_repeatable():
@@ -62,6 +63,6 @@ def test_motion_tool_can_write_renderer_neutral_plan(tmp_path):
 
 
 def test_cat_tv_tool_schemas_are_valid_draft_2020_12():
-    for name in ("cat_prey_motion", "cat_prey_blender"):
+    for name in ("cat_prey_motion", "cat_prey_blender", "cat_tv_world_polish"):
         schema = json.loads(Path(f"schemas/tools/{name}.schema.json").read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator.check_schema(schema)
