@@ -1,28 +1,76 @@
 # Cat TV examples
 
-The first supported production is a deterministic **Mouse Hunt**. The core footage does not require a paid generative-video provider.
+The first supported production is a deterministic **Mouse Hunt** for the CatFactory / Cat TV Lab workflow. Core footage is local and procedural; it does not require a paid generative-video provider.
 
 ## Requirements
 
-- Blender 4.5 LTS available to OpenMontage (`BLENDER_PATH` or the normal `blender_world` setup).
+- Blender 4.5+ available to OpenMontage (`BLENDER_PATH` or the normal `blender_world` setup).
+- FFmpeg and ffprobe on `PATH`.
 - A legally usable mouse model in GLB/GLTF, FBX, or OBJ format.
-- FFmpeg/OpenMontage composition tools for packaging the rendered PNG sequence.
 
-`mouse-hunt-60s.json` uses `${MOUSE_GLB_PATH}` as an intentional placeholder. Do not commit a binary model without recording its source and license.
+`mouse-hunt-60s.json` uses `${MOUSE_GLB_PATH}` intentionally. Do not commit a third-party binary model without recording its source and license.
 
 ## Production flow
 
-1. Run `cat_prey_motion` with the `motion` object from `mouse-hunt-60s.json`. This writes `mouse.motion.json`.
-2. Run `blender_world` with the `world` object. This creates the deterministic base environment as `base.blend`.
-3. Before the full render, set the prey render to roughly 12 seconds (720 frames at 60 fps) and run `cat_prey_blender` using your mouse asset.
-4. Review scale, ground contact, exits/re-entry, visibility changes, framing, and flicker.
-5. Render the approved 60-second sequence to numbered PNG frames.
-6. Package the sequence with `video_compose`/FFmpeg. Add only subtle ambience/SFX when desired; narration, text, and music are off by default.
+1. Run `cat_prey_motion` with the recipe `motion` object. This writes renderer-neutral seeded motion JSON.
+2. Run `blender_world` with the recipe `world` object. This creates the geometric base environment.
+3. Run `cat_tv_world_polish` once. It creates `base-polished.blend` with a stable organic ground palette, static clustered forest-floor detail, a terrain-edge guard, and a fixed environment seed.
+4. Render a 10-15 second sample with `cat_prey_blender` using `base-polished.blend`. Keep `decorate_world=false`; environment detail must not follow the prey-motion seed.
+5. Review scale, ground contact, body motion, exits/re-entry, visibility, framing, terrain-edge absence, background density, and flicker.
+6. Render production PNG sequences with resume enabled. Re-running the same request continues from the first missing frame.
+7. Encode reviewed PNG sequences to high-quality H.264 intermediates.
+8. Use `video_stitch` for long-form cut-only concatenation after compatibility validation.
+9. Use `frame_sampler` and `visual_qa` for representative-frame and ffprobe-backed QA.
+10. Optionally add subtle natural ambience. Narration, captions, spoken branding, and music are off by default for the continuous Cat TV stimulus.
 
-## Long-form output
+## 60-second sample recipe
 
-`blender_world`/Cat TV production is intentionally segmented. For a 30-minute, 1-hour, or 2-hour video, render segments of at most 600 seconds with distinct recorded seeds, then concatenate them with `video_stitch`. Avoid repeating one short loop.
+`mouse-hunt-60s.json` is the reference recipe. The production environment is now deliberately larger than the camera footprint, then polished into a separate reusable blend before prey rendering.
+
+## Long-form runner
+
+For a local resumable production, use:
+
+```bash
+python scripts/cat_tv_longform.py \
+  --recipe examples/cat-tv/mouse-hunt-60s.json \
+  --duration 2h \
+  --segment-seconds 300 \
+  --asset "$MOUSE_GLB_PATH"
+```
+
+Useful first checks:
+
+```bash
+# Plan only; no Blender render.
+python scripts/cat_tv_longform.py --duration 2h --plan-only
+
+# Render only the first five-minute segment as a production smoke test.
+python scripts/cat_tv_longform.py \
+  --duration 2h \
+  --segment-seconds 300 \
+  --max-segments 1 \
+  --asset "$MOUSE_GLB_PATH"
+```
+
+The runner creates one polished base world, then independent prey-motion segments with incrementing seeds. Each segment retains its motion JSON, editable `.blend`, resumable PNG sequence, encoded intermediate, QA frames, and mechanical probe report. The final master is validated and representative frames are extracted for human/agent visual review.
+
+For a two-hour program, the default strategy is **24 x 5-minute segments** rather than one two-hour Blender process or a repeated short loop.
+
+## Optional ambience
+
+If a natural ambience file is available, pass it only after the silent visual master is stable:
+
+```bash
+python scripts/cat_tv_longform.py \
+  --duration 2h \
+  --asset "$MOUSE_GLB_PATH" \
+  --ambience assets/cat-tv/audio/forest-ambience.wav \
+  --ambience-volume 0.13
+```
+
+Keep ambience subtle and continuous. Avoid obvious short-loop resets or loud transient effects.
 
 ## Current scope
 
-The deterministic motion grammar currently supports `mouse` only. Bird, butterfly, insect, fish, and other prey types should be added as separate tested behavior grammars rather than aliases of mouse motion.
+The deterministic motion grammar currently supports `mouse` only. Bird, butterfly, fly/insect, gecko, fish, and other prey should be added as separate tested behavior grammars rather than aliases of mouse motion.
