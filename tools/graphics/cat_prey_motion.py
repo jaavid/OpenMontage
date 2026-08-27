@@ -39,6 +39,7 @@ _REQUIRED_BEHAVIORS = (
 
 
 def _bounded_point(rng: random.Random, bounds: list[float], margin: float = 0.08) -> tuple[float, float]:
+    """Return a seeded point inside the bounds with an optional edge margin."""
     xmin, xmax, ymin, ymax = bounds
     mx = (xmax - xmin) * margin
     my = (ymax - ymin) * margin
@@ -46,6 +47,7 @@ def _bounded_point(rng: random.Random, bounds: list[float], margin: float = 0.08
 
 
 def _edge_point(rng: random.Random, bounds: list[float]) -> tuple[float, float]:
+    """Return a seeded point on one of the four motion bounds."""
     xmin, xmax, ymin, ymax = bounds
     edge = rng.choice(("left", "right", "bottom", "top"))
     if edge == "left":
@@ -58,6 +60,7 @@ def _edge_point(rng: random.Random, bounds: list[float]) -> tuple[float, float]:
 
 
 def _heading_degrees(a: tuple[float, float], b: tuple[float, float], fallback: float) -> float:
+    """Return the heading from point a to b, preserving fallback when stationary."""
     dx, dy = b[0] - a[0], b[1] - a[1]
     if abs(dx) < 1e-9 and abs(dy) < 1e-9:
         return fallback
@@ -72,11 +75,7 @@ def generate_mouse_plan(
     bounds: list[float] | None = None,
     z_offset: float = 0.03,
 ) -> dict[str, Any]:
-    """Generate a seeded mouse hunt plan.
-
-    For productions of at least 20 seconds, the first behavior cycle guarantees
-    all core Cat TV behaviors. Longer runs continue with seeded variations.
-    """
+    """Generate a deterministic mouse hunt plan with the core Cat TV behaviors."""
     duration = float(duration_seconds)
     if duration < 10 or duration > 600:
         raise ValueError("duration_seconds must be between 10 and 600")
@@ -166,7 +165,6 @@ def generate_mouse_plan(
             switch = min(duration, now + min(0.05, step / 3))
             add_keyframe(switch, position, behavior, is_visible=True, interpolation="CONSTANT")
             target = _bounded_point(rng, safe_bounds, margin=0.12)
-            # Peek movement is deliberately small.
             target = (
                 position[0] + (target[0] - position[0]) * 0.16,
                 position[1] + (target[1] - position[1]) * 0.16,
@@ -205,7 +203,6 @@ def generate_mouse_plan(
             "end": round(end, 4),
         })
 
-    # Guarantee an exact terminal keyframe so render duration and plan duration agree.
     if keyframes[-1]["time"] < duration:
         add_keyframe(duration, position, "pause", is_visible=visible, interpolation="CONSTANT")
 
@@ -225,7 +222,7 @@ def generate_mouse_plan(
 
 class CatPreyMotion(BaseTool):
     name = "cat_prey_motion"
-    version = "0.1.0"
+    version = "0.1.1"
     tier = ToolTier.GENERATE
     capability = "prey_motion_generation"
     provider = "openmontage"
@@ -255,8 +252,6 @@ class CatPreyMotion(BaseTool):
                 "items": {"type": "number"}, "default": DEFAULT_BOUNDS,
             },
             "z_offset": {"type": "number", "default": 0.03},
-            "asset_path": {"type": "string"},
-            "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.22},
             "output_path": {"type": "string"},
         },
     }
@@ -293,15 +288,6 @@ class CatPreyMotion(BaseTool):
             return ToolResult(success=False, error=str(exc))
 
         data: dict[str, Any] = {"motion_plan": plan}
-        asset_path = inputs.get("asset_path")
-        if asset_path:
-            data["animated_asset"] = {
-                "id": "cat-tv-mouse",
-                "path": str(asset_path),
-                "target_height": float(inputs.get("target_height", 0.22)),
-                "motion_plan": plan,
-            }
-
         artifacts: list[str] = []
         if inputs.get("output_path"):
             output = Path(str(inputs["output_path"])).expanduser().resolve()
