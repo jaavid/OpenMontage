@@ -1,14 +1,14 @@
 {
   "name": "mouse-hunt-60s",
   "pipeline": "cat-tv",
-  "description": "Production-oriented 60-second Cat TV mouse hunt with a reusable polished forest floor, stable camera, seeded prey behavior, and resumable rendering.",
+  "description": "Production-oriented 60-second Cat TV mouse hunt with a reusable polished forest floor, lower-TV play zone, corrected prey heading, seeded behavior, and resumable rendering.",
   "motion": {
     "operation": "generate",
     "prey_type": "mouse",
     "duration_seconds": 60,
     "fps": 60,
     "seed": 184321,
-    "bounds": [-4.0, 4.0, -2.0, 2.0],
+    "bounds": [-4.2, 4.2, -3.2, 0.3],
     "z_offset": 0.025,
     "output_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json"
   },
@@ -35,7 +35,7 @@
       },
       "camera": {
         "position": [0.0, -10.8, 4.25],
-        "target": [0.0, 0.8, 0.08],
+        "target": [0.0, 1.25, 0.08],
         "lens": 50
       },
       "lighting": {
@@ -54,9 +54,12 @@
     "blend_path": "projects/cat-tv/mouse-hunt-60s/base-polished.blend",
     "seed": 184321,
     "extension_size": 110,
-    "leaf_count": 180,
-    "twig_count": 28,
-    "stone_count": 14
+    "leaf_count": 48,
+    "twig_count": 10,
+    "stone_count": 6,
+    "surface_target_size": 14,
+    "surface_z_offset": 0.025,
+    "surface_rotation_degrees": 0
   },
   "prey_render": {
     "operation": "render_animation",
@@ -66,6 +69,7 @@
     "blend_path": "projects/cat-tv/mouse-hunt-60s/mouse-hunt.blend",
     "output_path": "projects/cat-tv/mouse-hunt-60s/frames/frame-",
     "target_height": 0.34,
+    "heading_offset_degrees": 180,
     "fps": 60,
     "start_frame": 1,
     "end_frame": 3600,
@@ -77,13 +81,15 @@
     "required": true,
     "duration_seconds": 12,
     "review": [
+      "prey faces the direction of travel rather than appearing to reverse",
+      "prey spends most of its visible time in the lower TV play zone where a cat can reach it",
       "prey occupies a clearly trackable portion of the frame",
       "prey scale and ground contact",
       "body motion reduces the sliding impression without excessive bouncing",
       "visibility transitions",
       "camera framing has no visible terrain edge or horizon break",
       "motion variety",
-      "forest-floor detail reads as organic and remains stable between segments",
+      "external forest-floor detail reads naturally and remains stable between segments",
       "background contrast without visual clutter",
       "absence of flicker or clipping"
     ]
