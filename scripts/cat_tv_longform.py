@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -47,21 +48,26 @@ def parse_duration(value: str) -> float:
 
 
 def segment_durations(total_seconds: float, target_seconds: float) -> list[float]:
-    """Split a production into valid 10..600 second render segments."""
-    if target_seconds < 10 or target_seconds > 600:
+    """Split a production into balanced valid 10..600 second render segments."""
+    total = float(total_seconds)
+    target = float(target_seconds)
+    if total < 10:
+        raise ValueError("total duration must be at least 10 seconds")
+    if target < 10 or target > 600:
         raise ValueError("segment_seconds must be between 10 and 600")
-    remaining = float(total_seconds)
-    result: list[float] = []
-    while remaining > target_seconds:
-        result.append(float(target_seconds))
-        remaining -= target_seconds
-    if remaining > 0:
-        if remaining < 10 and result and result[-1] + remaining <= 600:
-            result[-1] += remaining
-        else:
-            result.append(remaining)
-    if any(value < 10 or value > 600 for value in result):
-        raise ValueError(f"Could not create valid Cat TV segments: {result}")
+
+    count = max(1, math.ceil(total / target))
+    while count > 1 and total / count < 10:
+        count -= 1
+    duration = total / count
+    if duration < 10 or duration > 600:
+        raise ValueError(
+            f"Could not split {total_seconds}s into valid Cat TV segments with target {target_seconds}s"
+        )
+
+    result = [duration for _ in range(count)]
+    # Keep the exact requested total despite floating-point division.
+    result[-1] += total - sum(result)
     return result
 
 
@@ -74,6 +80,12 @@ def env_expand(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: env_expand(item) for key, item in value.items()}
     return value
+
+
+def canonical_digest(payload: Any) -> str:
+    """Return a stable digest for resume/config invalidation."""
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def run_ffmpeg_encode(prefix: Path, fps: int, output: Path, crf: int, preset: str) -> None:
@@ -115,12 +127,39 @@ def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def build_world(recipe: dict[str, Any], project: Path, force: bool) -> Path:
+def read_json(path: Path) -> dict[str, Any] | None:
+    """Read an optional JSON artifact, returning None when unavailable or invalid."""
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def build_world(recipe: dict[str, Any], project: Path, force: bool) -> tuple[Path, str]:
     """Build and polish the one environment shared by all prey segments."""
     base = project / "base.blend"
     polished = project / "base-polished.blend"
-    if polished.is_file() and not force:
-        return polished
+    config_path = project / "world-config.json"
+    world_config = {
+        "world": recipe["world"],
+        "world_polish": recipe.get("world_polish") or {},
+    }
+    world_digest = canonical_digest(world_config)
+    previous = read_json(config_path)
+    if (
+        polished.is_file()
+        and not force
+        and previous
+        and previous.get("digest") == world_digest
+    ):
+        return polished, world_digest
+
+    for path in (base, polished, polished.with_suffix(".world-polish.json")):
+        if path.exists():
+            path.unlink()
 
     world_inputs = copy.deepcopy(recipe["world"])
     world_inputs["blend_path"] = str(base)
@@ -139,12 +178,39 @@ def build_world(recipe: dict[str, Any], project: Path, force: bool) -> Path:
     polish_result = CatTVWorldPolish().execute(polish_inputs)
     if not polish_result.success:
         raise RuntimeError(f"cat_tv_world_polish failed: {polish_result.error}")
-    return polished
+    write_json(config_path, {"digest": world_digest, **world_config})
+    return polished, world_digest
+
+
+def segment_signature(
+    recipe: dict[str, Any],
+    duration: float,
+    seed: int,
+    asset: Path,
+    world_digest: str,
+) -> dict[str, Any]:
+    """Return the fields that must match before old rendered frames may be resumed."""
+    return {
+        "seed": seed,
+        "duration_seconds": duration,
+        "fps": int(recipe["motion"].get("fps", 60)),
+        "world_digest": world_digest,
+        "asset_path": str(asset.resolve()),
+        "target_height": float(recipe["prey_render"].get("target_height", 0.34)),
+    }
+
+
+def clear_stale_segment(segment_dir: Path) -> None:
+    """Delete stale derived artifacts while keeping the segment directory address stable."""
+    if segment_dir.exists():
+        shutil.rmtree(segment_dir)
+    segment_dir.mkdir(parents=True, exist_ok=True)
 
 
 def render_segment(
     recipe: dict[str, Any],
     base_blend: Path,
+    world_digest: str,
     project: Path,
     index: int,
     duration: float,
@@ -157,6 +223,28 @@ def render_segment(
     """Generate, render, encode and mechanically QA one long-form segment."""
     fps = int(recipe["motion"].get("fps", 60))
     segment_dir = project / "segments" / f"segment-{index:03d}"
+    record_path = segment_dir / "segment.json"
+    expected_signature = segment_signature(recipe, duration, seed, asset, world_digest)
+    existing_record = read_json(record_path)
+
+    if existing_record:
+        recorded_signature = existing_record.get("signature")
+        if recorded_signature != expected_signature:
+            clear_stale_segment(segment_dir)
+            existing_record = None
+    elif segment_dir.exists():
+        # Interrupted renders may not have a final record yet. Trust them only
+        # when their persisted motion plan proves the same seed and duration.
+        existing_motion = read_json(segment_dir / "motion.json")
+        motion_matches = bool(
+            existing_motion
+            and existing_motion.get("seed") == seed
+            and abs(float(existing_motion.get("duration_seconds", -1)) - duration) < 1e-6
+            and int(existing_motion.get("fps", -1)) == fps
+        )
+        if not motion_matches and any(segment_dir.iterdir()):
+            clear_stale_segment(segment_dir)
+
     frame_dir = segment_dir / "frames"
     frame_dir.mkdir(parents=True, exist_ok=True)
     motion_path = segment_dir / "motion.json"
@@ -199,7 +287,7 @@ def render_segment(
             f"segment {index}: expected {expected_frames} PNG frames, found {actual_frames}; rerun with resume enabled"
         )
 
-    if not clip_path.is_file():
+    if not clip_path.is_file() or not existing_record:
         run_ffmpeg_encode(frame_prefix, fps, clip_path, crf, preset)
 
     probe = VisualQA().execute({
@@ -216,6 +304,10 @@ def render_segment(
     })
     if not probe.success:
         raise RuntimeError(f"segment {index}: visual_qa probe failed: {probe.error}")
+    if not probe.data.get("validation_passed", False):
+        raise RuntimeError(
+            f"segment {index}: mechanical QA failed: {probe.data.get('validation_issues', [])}"
+        )
 
     sampled = FrameSampler().execute({
         "input_path": str(clip_path),
@@ -230,6 +322,7 @@ def render_segment(
 
     record = {
         "index": index,
+        "signature": expected_signature,
         "seed": seed,
         "duration_seconds": duration,
         "fps": fps,
@@ -240,7 +333,7 @@ def render_segment(
         "qa_frames": sampled.data.get("frames", []),
         "probe": probe.data,
     }
-    write_json(segment_dir / "segment.json", record)
+    write_json(record_path, record)
     return record
 
 
@@ -317,13 +410,14 @@ def main() -> int:
         print(json.dumps(plan, indent=2))
         return 0
 
-    base_blend = build_world(recipe, project, args.force_world)
+    base_blend, world_digest = build_world(recipe, project, args.force_world)
     records: list[dict[str, Any]] = []
     for entry in plan:
         print(f"[cat-tv] segment {entry['index']}/{len(plan)} seed={entry['seed']} duration={entry['duration_seconds']:.2f}s")
         record = render_segment(
             recipe,
             base_blend,
+            world_digest,
             project,
             entry["index"],
             entry["duration_seconds"],
@@ -347,7 +441,7 @@ def main() -> int:
         final_master = project / "mouse-hunt-master.mp4"
         mux_ambience(silent_master, ambience, final_master, args.ambience_volume)
 
-    expected_duration = sum(record["duration_seconds"] for record in records)
+    expected_duration = sum(record["frames"] / record["fps"] for record in records)
     final_probe = VisualQA().execute({
         "operation": "probe",
         "input_path": str(final_master),
@@ -362,6 +456,8 @@ def main() -> int:
     })
     if not final_probe.success:
         raise RuntimeError(f"Final VisualQA probe failed: {final_probe.error}")
+    if not final_probe.data.get("validation_passed", False):
+        raise RuntimeError(f"Final mechanical QA failed: {final_probe.data.get('validation_issues', [])}")
 
     final_frames = FrameSampler().execute({
         "input_path": str(final_master),
@@ -379,6 +475,7 @@ def main() -> int:
         "silent_master": str(silent_master),
         "duration_seconds": expected_duration,
         "segment_count": len(records),
+        "world_digest": world_digest,
         "segments": records,
         "final_probe": final_probe.data,
         "final_qa_frames": final_frames.data.get("frames", []),
