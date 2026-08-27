@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openmontage/tools/cat_prey_motion",
+  "title": "Cat Prey Motion Input",
+  "type": "object",
+  "properties": {
+    "operation": {"type": "string", "enum": ["generate"], "default": "generate"},
+    "prey_type": {"type": "string", "enum": ["mouse"], "default": "mouse"},
+    "duration_seconds": {"type": "number", "minimum": 10, "maximum": 600, "default": 60},
+    "fps": {"type": "integer", "minimum": 1, "maximum": 120, "default": 60},
+    "seed": {"type": "integer", "default": 184321},
+    "bounds": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"type": "number"},
+      "default": [-4.5, 4.5, -2.3, 2.3]
+    },
+    "z_offset": {"type": "number", "default": 0.03},
+    "asset_path": {"type": "string"},
+    "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.22},
+    "output_path": {"type": "string"}
+  },
+  "additionalProperties": false
+}
