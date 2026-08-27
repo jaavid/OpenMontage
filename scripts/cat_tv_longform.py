@@ -66,7 +66,6 @@ def segment_durations(total_seconds: float, target_seconds: float) -> list[float
         )
 
     result = [duration for _ in range(count)]
-    # Keep the exact requested total despite floating-point division.
     result[-1] += total - sum(result)
     return result
 
@@ -138,23 +137,26 @@ def read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def build_world(recipe: dict[str, Any], project: Path, force: bool) -> tuple[Path, str]:
+def build_world(
+    recipe: dict[str, Any],
+    project: Path,
+    force: bool,
+    world_asset: Path | None,
+) -> tuple[Path, str]:
     """Build and polish the one environment shared by all prey segments."""
     base = project / "base.blend"
     polished = project / "base-polished.blend"
     config_path = project / "world-config.json"
+    effective_polish = copy.deepcopy(recipe.get("world_polish") or {})
+    if world_asset is not None:
+        effective_polish["surface_asset_path"] = str(world_asset.resolve())
     world_config = {
         "world": recipe["world"],
-        "world_polish": recipe.get("world_polish") or {},
+        "world_polish": effective_polish,
     }
     world_digest = canonical_digest(world_config)
     previous = read_json(config_path)
-    if (
-        polished.is_file()
-        and not force
-        and previous
-        and previous.get("digest") == world_digest
-    ):
+    if polished.is_file() and not force and previous and previous.get("digest") == world_digest:
         return polished, world_digest
 
     for path in (base, polished, polished.with_suffix(".world-polish.json")):
@@ -169,7 +171,7 @@ def build_world(recipe: dict[str, Any], project: Path, force: bool) -> tuple[Pat
     if not base.is_file():
         raise RuntimeError(f"blender_world did not produce {base}")
 
-    polish_inputs = copy.deepcopy(recipe.get("world_polish") or {})
+    polish_inputs = effective_polish
     polish_inputs.update({
         "operation": "polish",
         "base_blend_path": str(base),
@@ -197,6 +199,7 @@ def segment_signature(
         "world_digest": world_digest,
         "asset_path": str(asset.resolve()),
         "target_height": float(recipe["prey_render"].get("target_height", 0.34)),
+        "heading_offset_degrees": float(recipe["prey_render"].get("heading_offset_degrees", 0.0)),
     }
 
 
@@ -233,8 +236,6 @@ def render_segment(
             clear_stale_segment(segment_dir)
             existing_record = None
     elif segment_dir.exists():
-        # Interrupted renders may not have a final record yet. Trust them only
-        # when their persisted motion plan proves the same seed and duration.
         existing_motion = read_json(segment_dir / "motion.json")
         motion_matches = bool(
             existing_motion
@@ -273,7 +274,6 @@ def render_segment(
         "start_frame": 1,
         "end_frame": max(1, round(duration * fps)),
         "resume": resume,
-        # Static litter belongs to base-polished.blend, never to a prey seed.
         "decorate_world": False,
     })
     render_result = CatPreyBlender().execute(render_inputs)
@@ -368,6 +368,7 @@ def main() -> int:
     parser.add_argument("--segment-seconds", type=float, default=300.0)
     parser.add_argument("--project-dir", default="projects/cat-tv/mouse-hunt-longform")
     parser.add_argument("--asset", help="Prey asset path; defaults to recipe/MOUSE_GLB_PATH")
+    parser.add_argument("--world-asset", help="Optional GLB/GLTF/FBX/OBJ forest-floor surface layered over the procedural safety terrain")
     parser.add_argument("--base-seed", type=int)
     parser.add_argument("--crf", type=int, default=16)
     parser.add_argument("--preset", default="slow")
@@ -389,6 +390,12 @@ def main() -> int:
     if not asset.is_file():
         raise SystemExit(f"Prey asset not found: {asset}. Set --asset or MOUSE_GLB_PATH.")
 
+    world_asset = None
+    if args.world_asset:
+        world_asset = Path(args.world_asset).expanduser().resolve()
+        if not world_asset.is_file():
+            raise SystemExit(f"World surface asset not found: {world_asset}")
+
     durations = segment_durations(args.duration, args.segment_seconds)
     if args.max_segments:
         durations = durations[: max(1, args.max_segments)]
@@ -405,12 +412,13 @@ def main() -> int:
         "segments": plan,
         "environment_seed": int((recipe.get("world_polish") or {}).get("seed", base_seed)),
         "asset": str(asset),
+        "world_asset": str(world_asset) if world_asset else None,
     })
     if args.plan_only:
         print(json.dumps(plan, indent=2))
         return 0
 
-    base_blend, world_digest = build_world(recipe, project, args.force_world)
+    base_blend, world_digest = build_world(recipe, project, args.force_world, world_asset)
     records: list[dict[str, Any]] = []
     for entry in plan:
         print(f"[cat-tv] segment {entry['index']}/{len(plan)} seed={entry['seed']} duration={entry['duration_seconds']:.2f}s")
@@ -476,12 +484,14 @@ def main() -> int:
         "duration_seconds": expected_duration,
         "segment_count": len(records),
         "world_digest": world_digest,
+        "world_asset": str(world_asset) if world_asset else None,
         "segments": records,
         "final_probe": final_probe.data,
         "final_qa_frames": final_frames.data.get("frames", []),
         "human_review_required": [
             "terrain edge/horizon is absent",
-            "prey stays trackable and grounded",
+            "prey stays in the lower TV play zone and remains trackable and grounded",
+            "prey faces the direction of travel rather than appearing to reverse",
             "segment joins do not create distracting prey/background jumps",
             "no flicker, clipping, strobing, or broken visibility transitions",
             "ambience, when present, remains subtle and non-fatiguing",
