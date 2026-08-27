@@ -1,16 +1,16 @@
 {
   "name": "mouse-hunt-60s",
   "pipeline": "cat-tv",
-  "description": "Deterministic 60-second Cat TV mouse-hunt production recipe.",
+  "description": "Deterministic 60-second Cat TV mouse-hunt production recipe, tuned for prey readability and natural low-angle framing.",
   "motion": {
     "operation": "generate",
     "prey_type": "mouse",
     "duration_seconds": 60,
     "fps": 60,
     "seed": 184321,
-    "bounds": [-4.5, 4.5, -2.3, 2.3],
-    "z_offset": 0.03,
-    "target_height": 0.22,
+    "bounds": [-4.0, 4.0, -2.0, 2.0],
+    "z_offset": 0.025,
+    "target_height": 0.34,
     "output_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json"
   },
   "world": {
@@ -24,28 +24,53 @@
       "seed": 184321,
       "fps": 60,
       "terrain": {
-        "size": 14,
-        "resolution": 96,
-        "height_scale": 0.35,
-        "frequency": 0.045,
+        "size": 12,
+        "resolution": 112,
+        "height_scale": 0.20,
+        "frequency": 0.065,
         "palette": [
-          [0.12, 0.22, 0.07, 1.0],
-          [0.23, 0.31, 0.10, 1.0],
-          [0.30, 0.22, 0.12, 1.0]
+          [0.20, 0.31, 0.11, 1.0],
+          [0.31, 0.39, 0.14, 1.0],
+          [0.38, 0.27, 0.14, 1.0]
         ]
       },
+      "regions": [
+        {
+          "id": "leaf-litter-left",
+          "center": [-2.4, 0.8],
+          "radius": 3.0,
+          "color": [0.36, 0.26, 0.13, 1.0],
+          "roughness": 0.96,
+          "height_offset": 0.015
+        },
+        {
+          "id": "moss-center",
+          "center": [1.4, -0.2],
+          "radius": 2.8,
+          "color": [0.27, 0.38, 0.13, 1.0],
+          "roughness": 0.94,
+          "height_offset": 0.01
+        },
+        {
+          "id": "dry-ground-right",
+          "center": [3.0, 1.1],
+          "radius": 2.2,
+          "color": [0.42, 0.31, 0.16, 1.0],
+          "roughness": 0.97
+        }
+      ],
       "camera": {
-        "position": [0.0, -10.5, 7.2],
-        "target": [0.0, 0.0, 0.1],
-        "lens": 52
+        "position": [0.0, -9.4, 4.8],
+        "target": [0.0, 0.0, 0.16],
+        "lens": 42
       },
       "lighting": {
-        "sun_energy": 2.0,
-        "sun_angle_degrees": 22,
-        "sun_rotation_degrees": [32, -24, -28],
-        "fill_energy": 500,
-        "world_color": [0.12, 0.16, 0.10, 1],
-        "world_strength": 0.45
+        "sun_energy": 2.5,
+        "sun_angle_degrees": 28,
+        "sun_rotation_degrees": [34, -22, -30],
+        "fill_energy": 900,
+        "world_color": [0.18, 0.22, 0.12, 1],
+        "world_strength": 0.62
       }
     }
   },
@@ -56,7 +81,7 @@
     "motion_plan_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json",
     "blend_path": "projects/cat-tv/mouse-hunt-60s/mouse-hunt.blend",
     "output_path": "projects/cat-tv/mouse-hunt-60s/frames/frame-",
-    "target_height": 0.22,
+    "target_height": 0.34,
     "fps": 60,
     "start_frame": 1,
     "end_frame": 3600
@@ -65,10 +90,13 @@
     "required": true,
     "duration_seconds": 12,
     "review": [
+      "prey occupies a clearly trackable portion of the frame",
       "prey scale and ground contact",
+      "body bob and tilt reduce the sliding impression",
       "visibility transitions",
       "camera framing",
       "motion variety",
+      "background contrast without visual clutter",
       "absence of flicker or clipping"
     ]
   }
