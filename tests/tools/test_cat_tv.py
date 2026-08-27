@@ -66,3 +66,9 @@ def test_cat_tv_tool_schemas_are_valid_draft_2020_12():
     for name in ("cat_prey_motion", "cat_prey_blender", "cat_tv_world_polish"):
         schema = json.loads(Path(f"schemas/tools/{name}.schema.json").read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator.check_schema(schema)
+
+
+def test_world_polish_runtime_uses_explicit_litter_report_keys():
+    runtime = Path("tools/graphics/templates/cat-tv-world-polish-runtime.py").read_text(encoding="utf-8")
+    assert 'report_key = {"leaf": "leaves", "twig": "twigs", "stone": "stones"}' in runtime
+    assert 'report[kind + "s"]' not in runtime
