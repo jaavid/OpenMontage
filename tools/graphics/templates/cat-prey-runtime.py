@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ def args_after_separator() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=60)
     parser.add_argument("--start-frame", type=int, default=1)
     parser.add_argument("--end-frame", type=int)
+    parser.add_argument("--decorate-world", action="store_true")
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1 :])
 
 
@@ -36,6 +38,17 @@ def select_eevee_engine(scene) -> str:
         except (TypeError, ValueError) as exc:
             errors.append(f"{candidate}: {exc}")
     raise RuntimeError("No supported Eevee engine found; " + "; ".join(errors))
+
+
+def material(name: str, color: tuple[float, float, float, float], roughness: float = 0.9):
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.diffuse_color = color
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF") if mat.node_tree else None
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = color
+        bsdf.inputs["Roughness"].default_value = roughness
+    return mat
 
 
 def import_asset(path: Path):
@@ -83,8 +96,9 @@ def import_asset(path: Path):
     return path_root, body_root, imported, source_height, source_floor
 
 
-def ground_height(x: float, y: float, imported: list) -> float:
-    states = [(obj, obj.hide_viewport) for obj in imported]
+def ground_height(x: float, y: float, hidden_objects: list | None = None) -> float:
+    hidden_objects = list(hidden_objects or [])
+    states = [(obj, obj.hide_viewport) for obj in hidden_objects]
     for obj, _state in states:
         obj.hide_viewport = True
     bpy.context.view_layer.update()
@@ -143,13 +157,13 @@ def set_curve_interpolation(obj, frame: int, interpolation: str) -> None:
 def micro_profile(behavior: str) -> tuple[float, float, float, float, float]:
     """Return cadence, bob amplitude/frequency, pitch and roll amplitudes."""
     profiles = {
-        "sprint": (0.10, 0.018, 5.2, 3.8, 2.1),
-        "edge_exit": (0.10, 0.016, 4.8, 3.2, 1.8),
-        "reentry": (0.11, 0.015, 4.5, 3.0, 1.7),
-        "explore": (0.16, 0.010, 3.1, 2.0, 1.2),
-        "peek": (0.18, 0.006, 2.2, 3.0, 1.5),
-        "pause": (0.28, 0.0025, 1.2, 0.7, 0.4),
-        "hide": (0.32, 0.0015, 0.9, 0.4, 0.3),
+        "sprint": (0.085, 0.013, 5.8, 3.6, 1.8),
+        "edge_exit": (0.095, 0.012, 5.0, 3.0, 1.5),
+        "reentry": (0.10, 0.011, 4.7, 2.8, 1.4),
+        "explore": (0.15, 0.008, 3.2, 1.7, 0.9),
+        "peek": (0.18, 0.005, 2.3, 2.5, 1.2),
+        "pause": (0.30, 0.0018, 1.1, 0.5, 0.3),
+        "hide": (0.34, 0.0010, 0.8, 0.3, 0.2),
     }
     return profiles.get(behavior, profiles["explore"])
 
@@ -169,7 +183,6 @@ def add_body_micro_motion(body_root, segments: list[dict], fps: int) -> int:
         for index in range(steps + 1):
             at = min(end, start + duration * index / steps)
             phase = math.tau * frequency * at
-            # Always bob upward from the grounded baseline: no terrain penetration.
             bob = bob_amp * abs(math.sin(phase))
             pitch = math.radians(pitch_deg) * math.sin(phase)
             roll = math.radians(roll_deg) * math.sin(phase * 0.5 + 0.8)
@@ -183,7 +196,7 @@ def add_body_micro_motion(body_root, segments: list[dict], fps: int) -> int:
     return inserted
 
 
-def apply_motion(plan: dict, asset: Path, target_height: float, fps: int) -> dict:
+def apply_motion(plan: dict, asset: Path, target_height: float, fps: int):
     path_root, body_root, imported, source_height, source_floor = import_asset(asset)
     scale = target_height / source_height
     body_root.scale = (scale, scale, scale)
@@ -207,7 +220,7 @@ def apply_motion(plan: dict, asset: Path, target_height: float, fps: int) -> dic
 
     micro_keyframes = add_body_micro_motion(body_root, list(plan.get("segments") or []), fps)
 
-    return {
+    report = {
         "prey_objects": len(imported),
         "keyframes": len(keyframes),
         "micro_keyframes": micro_keyframes,
@@ -215,6 +228,93 @@ def apply_motion(plan: dict, asset: Path, target_height: float, fps: int) -> dic
         "target_height": target_height,
         "seed": plan.get("seed"),
     }
+    return report, [path_root, body_root, *imported]
+
+
+def make_mesh(name: str, vertices: list[tuple], faces: list[tuple]):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    return mesh
+
+
+def point_near_path(x: float, y: float, path_points: list[tuple[float, float]], clearance: float) -> bool:
+    return any(math.hypot(x - px, y - py) < clearance for px, py in path_points)
+
+
+def decorate_world(plan: dict, cat_objects: list) -> dict:
+    """Create lightweight deterministic leaf litter, twigs and stones without external assets."""
+    rng = random.Random(int(plan.get("seed", 1)) + 7919)
+    bounds = list(plan.get("bounds") or [-4.0, 4.0, -2.0, 2.0])
+    xmin, xmax, ymin, ymax = [float(value) for value in bounds]
+    xmin -= 3.0
+    xmax += 3.0
+    ymin -= 3.0
+    ymax += 5.0
+    path_points = [tuple(map(float, key.get("position", [0, 0])[:2])) for key in plan.get("keyframes", [])]
+
+    leaf_mesh = make_mesh(
+        "CAT_TV_LEAF_MESH",
+        [(-0.13, 0.0, 0.0), (0.0, 0.065, 0.008), (0.13, 0.0, 0.0), (0.0, -0.065, -0.003)],
+        [(0, 1, 2, 3)],
+    )
+    twig_mesh = make_mesh(
+        "CAT_TV_TWIG_MESH",
+        [
+            (-0.22, -0.018, -0.012), (0.22, -0.018, -0.012), (0.22, 0.018, -0.012), (-0.22, 0.018, -0.012),
+            (-0.22, -0.018, 0.012), (0.22, -0.018, 0.012), (0.22, 0.018, 0.012), (-0.22, 0.018, 0.012),
+        ],
+        [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (4, 0, 3, 7)],
+    )
+    stone_mesh = make_mesh(
+        "CAT_TV_STONE_MESH",
+        [(0, 0, 0.11), (0.11, 0, 0), (0, 0.09, 0), (-0.11, 0, 0), (0, -0.09, 0), (0, 0, -0.055)],
+        [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1), (5, 2, 1), (5, 3, 2), (5, 4, 3), (5, 1, 4)],
+    )
+
+    leaf_mats = [
+        material("CAT_TV_Leaf_Ochre", (0.34, 0.19, 0.055, 1.0), 0.96),
+        material("CAT_TV_Leaf_Brown", (0.22, 0.105, 0.035, 1.0), 0.97),
+        material("CAT_TV_Leaf_Muted", (0.39, 0.29, 0.09, 1.0), 0.95),
+    ]
+    twig_mats = [
+        material("CAT_TV_Twig_Dark", (0.11, 0.055, 0.022, 1.0), 0.92),
+        material("CAT_TV_Twig_Light", (0.20, 0.105, 0.035, 1.0), 0.94),
+    ]
+    stone_mats = [
+        material("CAT_TV_Stone_Warm", (0.19, 0.17, 0.13, 1.0), 0.90),
+        material("CAT_TV_Stone_Moss", (0.15, 0.18, 0.10, 1.0), 0.92),
+    ]
+
+    created = {"leaves": 0, "twigs": 0, "stones": 0}
+
+    def spawn(kind: str, mesh, mats: list, count: int, clearance: float, z_offset: float, scale_range: tuple[float, float]):
+        attempts = 0
+        while created[kind] < count and attempts < count * 12:
+            attempts += 1
+            x = rng.uniform(xmin, xmax)
+            y = rng.uniform(ymin, ymax)
+            if point_near_path(x, y, path_points, clearance):
+                continue
+            z = ground_height(x, y, cat_objects) + z_offset
+            obj = bpy.data.objects.new(f"CAT_TV_{kind.upper()}_{created[kind]:03d}", mesh)
+            bpy.context.collection.objects.link(obj)
+            obj.location = (x, y, z)
+            obj.rotation_euler = (
+                rng.uniform(-0.10, 0.10),
+                rng.uniform(-0.10, 0.10),
+                rng.uniform(0.0, math.tau),
+            )
+            scale = rng.uniform(*scale_range)
+            obj.scale = (scale, scale * rng.uniform(0.75, 1.15), scale)
+            obj.data.materials.clear()
+            obj.data.materials.append(rng.choice(mats))
+            created[kind] += 1
+
+    spawn("leaves", leaf_mesh, leaf_mats, 90, 0.22, 0.018, (0.65, 1.55))
+    spawn("twigs", twig_mesh, twig_mats, 28, 0.42, 0.025, (0.65, 1.35))
+    spawn("stones", stone_mesh, stone_mats, 18, 0.55, 0.055, (0.65, 1.30))
+    return created
 
 
 def main() -> None:
@@ -222,7 +322,10 @@ def main() -> None:
     motion_path = Path(args.motion).expanduser().resolve()
     asset_path = Path(args.asset).expanduser().resolve()
     plan = json.loads(motion_path.read_text(encoding="utf-8"))
-    report = apply_motion(plan, asset_path, args.target_height, args.fps)
+    report, cat_objects = apply_motion(plan, asset_path, args.target_height, args.fps)
+
+    if args.decorate_world:
+        report["forest_floor"] = decorate_world(plan, cat_objects)
 
     scene = bpy.context.scene
     scene.render.fps = args.fps
@@ -237,7 +340,7 @@ def main() -> None:
     blend_path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
     report_path = blend_path.with_suffix(".cat-tv-report.json")
-    report_path.write_text(json.dumps({"version": "1.1", **report}, indent=2), encoding="utf-8")
+    report_path.write_text(json.dumps({"version": "1.2", **report}, indent=2), encoding="utf-8")
 
     if args.operation == "render_animation":
         if not args.output:
