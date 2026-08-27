@@ -1,0 +1,299 @@
+name: Cat TV Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Render runner; use cat-tv-linux for long production renders
+        required: true
+        default: ubuntu-24.04
+        type: choice
+        options:
+          - ubuntu-24.04
+          - cat-tv-linux
+      duration:
+        description: Total output duration (for example 12s, 60s, 30m, 2h)
+        required: true
+        default: 12s
+        type: string
+      segment_seconds:
+        description: Seconds per recoverable Blender segment
+        required: true
+        default: 12
+        type: number
+      world:
+        description: Forest-floor asset
+        required: true
+        default: pine
+        type: choice
+        options:
+          - pine
+          - rocky
+          - forest
+      retention_days:
+        description: Final MP4 artifact retention
+        required: true
+        default: 30
+        type: number
+  # While this workflow lives only on the feature branch, pushing the LFS assets
+  # gives us one automatic 12-second Pine preview. workflow_dispatch becomes
+  # available normally once the workflow exists on the default branch.
+  push:
+    branches:
+      - feature/cat-tv-mvp
+    paths:
+      - assets/cat-tv/**/*.glb
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cat-tv-render-${{ github.ref }}-${{ inputs.world || 'pine' }}
+  cancel-in-progress: false
+
+env:
+  BLENDER_VERSION: 5.2.1
+  BLENDER_SERIES: "5.2"
+  RENDER_RUNNER: ${{ inputs.runner || 'ubuntu-24.04' }}
+  RENDER_DURATION: ${{ inputs.duration || '12s' }}
+  SEGMENT_SECONDS: ${{ inputs.segment_seconds || 12 }}
+  WORLD_CHOICE: ${{ inputs.world || 'pine' }}
+  RETENTION_DAYS: ${{ inputs.retention_days || 30 }}
+
+jobs:
+  render:
+    name: Render Cat TV (${{ inputs.world || 'pine' }}, ${{ inputs.duration || '12s' }})
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ (inputs.runner || 'ubuntu-24.04') == 'cat-tv-linux' && 1440 || 350 }}
+
+    steps:
+      - name: Checkout repository and LFS assets
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install hosted Linux dependencies
+        if: ${{ (inputs.runner || 'ubuntu-24.04') == 'ubuntu-24.04' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg git-lfs xz-utils curl ca-certificates xvfb \
+            libegl1 libgl1 libgl1-mesa-dri libx11-6 libxi6 libxrender1 \
+            libxxf86vm1 libxfixes3 libxkbcommon0 libsm6 libice6
+
+      - name: Verify self-hosted prerequisites
+        if: ${{ (inputs.runner || 'ubuntu-24.04') == 'cat-tv-linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ffmpeg >/dev/null || { echo "ffmpeg is required on cat-tv-linux"; exit 1; }
+          command -v git-lfs >/dev/null || { echo "git-lfs is required on cat-tv-linux"; exit 1; }
+
+      - name: Pull Git LFS payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull
+          git lfs ls-files
+
+      - name: Install OpenMontage Python dependencies
+        shell: bash
+        run: make install-dev
+
+      - name: Install or locate Blender 5.2.1
+        id: blender
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${BLENDER_PATH:-}" && -x "${BLENDER_PATH}" ]]; then
+            blender_bin="${BLENDER_PATH}"
+          elif command -v blender >/dev/null 2>&1; then
+            blender_bin="$(command -v blender)"
+          else
+            archive="blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+            base_url="https://download.blender.org/release/Blender${BLENDER_SERIES}"
+            install_root="${RUNNER_TEMP}/blender-${BLENDER_VERSION}"
+            mkdir -p "${install_root}"
+            curl --fail --location --retry 4 --retry-delay 2 \
+              "${base_url}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+            curl --fail --location --retry 4 --retry-delay 2 \
+              "${base_url}/blender-${BLENDER_VERSION}.sha256" -o "${RUNNER_TEMP}/blender.sha256"
+            grep " ${archive}$" "${RUNNER_TEMP}/blender.sha256" | \
+              (cd "${RUNNER_TEMP}" && sha256sum --check -)
+            tar -xJf "${RUNNER_TEMP}/${archive}" -C "${install_root}" --strip-components=1
+            blender_bin="${install_root}/blender"
+          fi
+
+          "${blender_bin}" --version | head -n 2
+          echo "BLENDER_PATH=${blender_bin}" >> "${GITHUB_ENV}"
+          echo "path=${blender_bin}" >> "${GITHUB_OUTPUT}"
+
+      - name: Start software display on GitHub-hosted runner
+        if: ${{ (inputs.runner || 'ubuntu-24.04') == 'ubuntu-24.04' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >"${RUNNER_TEMP}/xvfb.log" 2>&1 &
+          echo "DISPLAY=:99" >> "${GITHUB_ENV}"
+          echo "LIBGL_ALWAYS_SOFTWARE=1" >> "${GITHUB_ENV}"
+          sleep 2
+
+      - name: Resolve and verify Cat TV assets
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          prey="assets/cat-tv/prey/mouse.glb"
+          case "${WORLD_CHOICE}" in
+            pine)   world="assets/cat-tv/world/pine_needle_forest_floor.glb" ;;
+            rocky)  world="assets/cat-tv/world/rocky_forest_floor_texture.glb" ;;
+            forest) world="assets/cat-tv/world/forest_floor.glb" ;;
+            *) echo "Unknown world: ${WORLD_CHOICE}"; exit 1 ;;
+          esac
+
+          for asset in "${prey}" "${world}"; do
+            test -s "${asset}" || { echo "Missing asset: ${asset}"; exit 1; }
+            if head -c 80 "${asset}" | grep -q "git-lfs.github.com/spec"; then
+              echo "LFS pointer was not materialized: ${asset}"
+              exit 1
+            fi
+            ls -lh "${asset}"
+          done
+
+          echo "MOUSE_GLB_PATH=${GITHUB_WORKSPACE}/${prey}" >> "${GITHUB_ENV}"
+          echo "WORLD_ASSET=${GITHUB_WORKSPACE}/${world}" >> "${GITHUB_ENV}"
+          echo "world_path=${world}" >> "${GITHUB_OUTPUT}"
+
+      - name: Enforce hosted-runner safety budget
+        if: ${{ (inputs.runner || 'ubuntu-24.04') == 'ubuntu-24.04' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from scripts.cat_tv_longform import parse_duration
+          import os
+
+          total = parse_duration(os.environ["RENDER_DURATION"])
+          segment = float(os.environ["SEGMENT_SECONDS"])
+          if total > 60:
+              raise SystemExit(
+                  f"GitHub-hosted preview is limited to 60 seconds (requested {total}s). "
+                  "Use the self-hosted cat-tv-linux runner for long renders."
+              )
+          if segment > 20:
+              raise SystemExit(
+                  f"GitHub-hosted segment_seconds is limited to 20 (requested {segment}). "
+                  "This protects the runner's 14 GB ephemeral SSD from PNG exhaustion."
+              )
+          PY
+
+      - name: Run Cat TV tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest tests/tools/test_cat_tv.py tests/tools/test_cat_tv_longform.py -q
+
+      - name: Render, encode, and delete completed frame sequences
+        id: render
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_dir="${RUNNER_TEMP}/cat-tv-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "PROJECT_DIR=${project_dir}" >> "${GITHUB_ENV}"
+
+          cleanup_completed_segments() {
+            if [[ ! -d "${project_dir}/segments" ]]; then
+              return 0
+            fi
+            while IFS= read -r -d '' record; do
+              segment_dir="$(dirname "${record}")"
+              if [[ -d "${segment_dir}/frames" ]]; then
+                echo "Deleting completed PNG sequence: ${segment_dir}/frames"
+                rm -rf "${segment_dir}/frames"
+              fi
+              if [[ -d "${segment_dir}/qa" ]]; then
+                rm -rf "${segment_dir}/qa"
+              fi
+            done < <(find "${project_dir}/segments" -name segment.json -print0 2>/dev/null || true)
+          }
+
+          python -m scripts.cat_tv_longform \
+            --recipe examples/cat-tv/mouse-hunt-60s.json \
+            --duration "${RENDER_DURATION}" \
+            --segment-seconds "${SEGMENT_SECONDS}" \
+            --project-dir "${project_dir}" \
+            --asset "${MOUSE_GLB_PATH}" \
+            --world-asset "${WORLD_ASSET}" &
+          render_pid=$!
+
+          (
+            while kill -0 "${render_pid}" 2>/dev/null; do
+              cleanup_completed_segments
+              sleep 10
+            done
+          ) &
+          cleanup_pid=$!
+
+          set +e
+          wait "${render_pid}"
+          render_status=$?
+          set -e
+          kill "${cleanup_pid}" 2>/dev/null || true
+          wait "${cleanup_pid}" 2>/dev/null || true
+          cleanup_completed_segments
+
+          if [[ "${render_status}" -ne 0 ]]; then
+            exit "${render_status}"
+          fi
+
+          master="${project_dir}/mouse-hunt-master-silent.mp4"
+          test -s "${master}" || { echo "Final master was not produced: ${master}"; exit 1; }
+
+          safe_duration="$(printf '%s' "${RENDER_DURATION}" | tr -cs '[:alnum:].-' '-')"
+          delivery="${RUNNER_TEMP}/cat-tv-mouse-${WORLD_CHOICE}-${safe_duration}-run-${GITHUB_RUN_NUMBER}.mp4"
+          cp "${master}" "${delivery}"
+          sha256sum "${delivery}"
+          ls -lh "${delivery}"
+
+          # The project tree contains PNGs, .blend files, reports, QA JPEGs and
+          # intermediate segment videos. The Actions deliverable is intentionally
+          # only the final MP4, so delete the complete project workspace now.
+          rm -rf "${project_dir}"
+
+          echo "DELIVERY_FILE=${delivery}" >> "${GITHUB_ENV}"
+          echo "delivery=${delivery}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish final MP4 only
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.DELIVERY_FILE }}
+          retention-days: ${{ env.RETENTION_DAYS }}
+          if-no-files-found: error
+          archive: false
+
+      - name: Render summary
+        shell: bash
+        run: |
+          {
+            echo "## Cat TV render"
+            echo
+            echo "- Runner: \`${RENDER_RUNNER}\`"
+            echo "- Blender: \`${BLENDER_VERSION}\`"
+            echo "- Duration: \`${RENDER_DURATION}\`"
+            echo "- Segment size: \`${SEGMENT_SECONDS}s\`"
+            echo "- World: \`${WORLD_CHOICE}\`"
+            echo "- Final artifact: \`$(basename "${DELIVERY_FILE}")\`"
+            echo "- Render PNGs/intermediates: deleted after successful encode"
+          } >> "${GITHUB_STEP_SUMMARY}"
