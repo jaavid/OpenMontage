@@ -49,3 +49,7 @@ Makefile    text eol=lf
 *.ttf   binary
 *.otf   binary
 *.pdf   binary
+
+# Cat TV third-party 3D assets live in Git LFS so Actions can fetch them
+# without bloating normal Git history.
+assets/cat-tv/**/*.glb filter=lfs diff=lfs merge=lfs -text
