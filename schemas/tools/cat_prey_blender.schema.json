@@ -13,6 +13,13 @@
     "blend_path": {"type": "string"},
     "output_path": {"type": "string"},
     "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.34},
+    "heading_offset_degrees": {
+      "type": "number",
+      "minimum": -360,
+      "maximum": 360,
+      "default": 0,
+      "description": "Asset-local forward-axis correction added to generated path headings."
+    },
     "fps": {"type": "integer", "minimum": 1, "maximum": 120},
     "start_frame": {"type": "integer", "minimum": 1},
     "end_frame": {"type": "integer", "minimum": 1},
