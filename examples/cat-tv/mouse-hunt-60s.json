@@ -1,0 +1,75 @@
+{
+  "name": "mouse-hunt-60s",
+  "pipeline": "cat-tv",
+  "description": "Deterministic 60-second Cat TV mouse-hunt production recipe.",
+  "motion": {
+    "operation": "generate",
+    "prey_type": "mouse",
+    "duration_seconds": 60,
+    "fps": 60,
+    "seed": 184321,
+    "bounds": [-4.5, 4.5, -2.3, 2.3],
+    "z_offset": 0.03,
+    "target_height": 0.22,
+    "output_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json"
+  },
+  "world": {
+    "operation": "build",
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "duration_seconds": 60,
+    "blend_path": "projects/cat-tv/mouse-hunt-60s/base.blend",
+    "world_spec": {
+      "seed": 184321,
+      "fps": 60,
+      "terrain": {
+        "size": 14,
+        "resolution": 96,
+        "height_scale": 0.35,
+        "frequency": 0.045,
+        "palette": [
+          [0.12, 0.22, 0.07, 1.0],
+          [0.23, 0.31, 0.10, 1.0],
+          [0.30, 0.22, 0.12, 1.0]
+        ]
+      },
+      "camera": {
+        "position": [0.0, -10.5, 7.2],
+        "target": [0.0, 0.0, 0.1],
+        "lens": 52
+      },
+      "lighting": {
+        "sun_energy": 2.0,
+        "sun_angle_degrees": 22,
+        "sun_rotation_degrees": [32, -24, -28],
+        "fill_energy": 500,
+        "world_color": [0.12, 0.16, 0.10, 1],
+        "world_strength": 0.45
+      }
+    }
+  },
+  "prey_render": {
+    "operation": "render_animation",
+    "base_blend_path": "projects/cat-tv/mouse-hunt-60s/base.blend",
+    "asset_path": "${MOUSE_GLB_PATH}",
+    "motion_plan_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json",
+    "blend_path": "projects/cat-tv/mouse-hunt-60s/mouse-hunt.blend",
+    "output_path": "projects/cat-tv/mouse-hunt-60s/frames/frame-",
+    "target_height": 0.22,
+    "fps": 60,
+    "start_frame": 1,
+    "end_frame": 3600
+  },
+  "sample_policy": {
+    "required": true,
+    "duration_seconds": 12,
+    "review": [
+      "prey scale and ground contact",
+      "visibility transitions",
+      "camera framing",
+      "motion variety",
+      "absence of flicker or clipping"
+    ]
+  }
+}
