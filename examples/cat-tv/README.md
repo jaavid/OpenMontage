@@ -29,10 +29,10 @@ The first supported production is a deterministic **Mouse Hunt** for the CatFact
 
 ## Long-form runner
 
-For a local resumable production, use:
+Invoke the runner as a module from the repository root so the OpenMontage tool packages are always importable:
 
 ```bash
-python scripts/cat_tv_longform.py \
+python -m scripts.cat_tv_longform \
   --recipe examples/cat-tv/mouse-hunt-60s.json \
   --duration 2h \
   --segment-seconds 300 \
@@ -43,10 +43,10 @@ Useful first checks:
 
 ```bash
 # Plan only; no Blender render.
-python scripts/cat_tv_longform.py --duration 2h --plan-only
+python -m scripts.cat_tv_longform --duration 2h --plan-only
 
 # Render only the first five-minute segment as a production smoke test.
-python scripts/cat_tv_longform.py \
+python -m scripts.cat_tv_longform \
   --duration 2h \
   --segment-seconds 300 \
   --max-segments 1 \
@@ -62,7 +62,7 @@ For a two-hour program, the default strategy is **24 x 5-minute segments** rathe
 If a natural ambience file is available, pass it only after the silent visual master is stable:
 
 ```bash
-python scripts/cat_tv_longform.py \
+python -m scripts.cat_tv_longform \
   --duration 2h \
   --asset "$MOUSE_GLB_PATH" \
   --ambience assets/cat-tv/audio/forest-ambience.wav \
