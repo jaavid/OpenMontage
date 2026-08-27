@@ -219,6 +219,7 @@ def scatter_static_litter(seed: int, leaf_count: int, twig_count: int, stone_cou
     ymax -= margin
     leaves, twigs, stones = build_litter_meshes()
     report = {"leaves": 0, "twigs": 0, "stones": 0}
+    report_key = {"leaf": "leaves", "twig": "twigs", "stone": "stones"}
 
     # Leaves form small irregular clusters instead of a uniform polka-dot field.
     cluster_count = max(8, min(28, leaf_count // 8 if leaf_count else 8))
@@ -248,7 +249,7 @@ def scatter_static_litter(seed: int, leaf_count: int, twig_count: int, stone_cou
             )
             scale = rng.uniform(*scale_range)
             obj.scale = (scale, scale * rng.uniform(0.72, 1.22), scale)
-            report[kind + "s"] += 1
+            report[report_key[kind]] += 1
 
     spawn("leaf", leaves, leaf_count, (0.42, 0.92), clustered=True)
     spawn("twig", twigs, twig_count, (0.45, 0.95))
