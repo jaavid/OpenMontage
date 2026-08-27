@@ -17,8 +17,6 @@
       "default": [-4.5, 4.5, -2.3, 2.3]
     },
     "z_offset": {"type": "number", "default": 0.03},
-    "asset_path": {"type": "string"},
-    "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.34},
     "output_path": {"type": "string"}
   },
   "additionalProperties": false
