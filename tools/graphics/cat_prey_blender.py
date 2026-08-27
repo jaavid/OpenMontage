@@ -20,7 +20,7 @@ _RUNTIME_SCRIPT = Path(__file__).resolve().parent / "templates" / "cat-prey-runt
 
 class CatPreyBlender(BaseTool):
     name = "cat_prey_blender"
-    version = "0.1.0"
+    version = "0.2.0"
     tier = ToolTier.GENERATE
     capability = "prey_animation_rendering"
     provider = "blender"
@@ -29,8 +29,11 @@ class CatPreyBlender(BaseTool):
     determinism = Determinism.SEEDED
     runtime = ToolRuntime.LOCAL_GPU
     dependencies: list[str] = []
-    install_instructions = "Install Blender 4.5 LTS or configure BLENDER_PATH as documented by blender_world."
-    capabilities = ["apply_prey_motion", "render_prey_animation", "ground_following_motion"]
+    install_instructions = "Install Blender 4.5+ or configure BLENDER_PATH as documented by blender_world."
+    capabilities = [
+        "apply_prey_motion", "render_prey_animation", "ground_following_motion",
+        "procedural_body_micro_motion",
+    ]
     supports = {"glb": True, "gltf": True, "fbx": True, "obj": True, "animation": True}
     best_for = ["Adding deterministic prey movement to a Blender world built by blender_world"]
     not_good_for = ["Generating the prey mesh itself"]
@@ -45,7 +48,7 @@ class CatPreyBlender(BaseTool):
             "motion_plan_path": {"type": "string"},
             "blend_path": {"type": "string"},
             "output_path": {"type": "string"},
-            "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.22},
+            "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.34},
             "fps": {"type": "integer", "minimum": 1, "maximum": 120},
             "start_frame": {"type": "integer", "minimum": 1},
             "end_frame": {"type": "integer", "minimum": 1},
@@ -57,7 +60,7 @@ class CatPreyBlender(BaseTool):
     idempotency_key_fields = ["operation", "base_blend_path", "asset_path", "motion_plan", "motion_plan_path", "target_height"]
     side_effects = ["writes a .blend project", "may render a PNG image sequence"]
     user_visible_verification = ["Review a 10-15 second sample before a long Cat TV render"]
-    quality_score = 0.92
+    quality_score = 0.93
 
     def get_status(self) -> ToolStatus:
         return ToolStatus.AVAILABLE if find_blender() and _RUNTIME_SCRIPT.is_file() else ToolStatus.UNAVAILABLE
@@ -109,16 +112,18 @@ class CatPreyBlender(BaseTool):
             "--asset", str(asset),
             "--motion", str(serialized_plan),
             "--blend", str(blend_path),
-            "--target-height", str(float(inputs.get("target_height", 0.22))),
+            "--target-height", str(float(inputs.get("target_height", 0.34))),
             "--fps", str(fps),
             "--start-frame", str(start_frame),
             "--end-frame", str(end_frame),
         ]
         output_path = inputs.get("output_path")
+        resolved_output: Path | None = None
         if operation == "render_animation":
             if not output_path:
                 return ToolResult(success=False, error="output_path is required for render_animation")
-            command.extend(["--output", str(Path(str(output_path)).expanduser().resolve())])
+            resolved_output = Path(str(output_path)).expanduser().resolve()
+            command.extend(["--output", str(resolved_output)])
 
         started = time.time()
         try:
@@ -128,8 +133,28 @@ class CatPreyBlender(BaseTool):
             )
         except Exception as exc:
             return ToolResult(success=False, error=f"Blender invocation failed: {exc}")
-        if process.returncode != 0:
-            return ToolResult(success=False, error="Cat prey Blender step failed: " + (process.stderr or process.stdout)[-3000:])
+
+        combined_output = "\n".join(part for part in (process.stdout, process.stderr) if part)
+        runtime_marker = "OPENMONTAGE_CAT_TV_REPORT=" in process.stdout
+        if (
+            process.returncode != 0
+            or "Traceback (most recent call last):" in combined_output
+            or not runtime_marker
+        ):
+            return ToolResult(success=False, error="Cat prey Blender step failed: " + combined_output[-3000:])
+        if not blend_path.is_file():
+            return ToolResult(
+                success=False,
+                error=f"Blender completed without writing the expected Cat TV blend file: {blend_path}\n{combined_output[-2000:]}",
+            )
+
+        if operation == "render_animation" and resolved_output is not None:
+            first_frame = resolved_output.parent / f"{resolved_output.name}{start_frame:04d}.png"
+            if not first_frame.is_file():
+                return ToolResult(
+                    success=False,
+                    error=f"Blender reported success but the first rendered frame is missing: {first_frame}",
+                )
 
         artifacts = [str(blend_path), str(serialized_plan)]
         report_path = blend_path.with_suffix(".cat-tv-report.json")
@@ -141,5 +166,5 @@ class CatPreyBlender(BaseTool):
             artifacts=artifacts,
             duration_seconds=round(time.time() - started, 2),
             seed=plan.get("seed"),
-            model="blender-4.5-lts-eevee-next",
+            model="blender-eevee-cat-tv-v2",
         )
