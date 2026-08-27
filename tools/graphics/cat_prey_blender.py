@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import time
@@ -20,7 +21,7 @@ _RUNTIME_SCRIPT = Path(__file__).resolve().parent / "templates" / "cat-prey-runt
 
 class CatPreyBlender(BaseTool):
     name = "cat_prey_blender"
-    version = "0.3.1"
+    version = "0.4.0"
     tier = ToolTier.GENERATE
     capability = "prey_animation_rendering"
     provider = "blender"
@@ -33,6 +34,7 @@ class CatPreyBlender(BaseTool):
     capabilities = [
         "apply_prey_motion", "render_prey_animation", "ground_following_motion",
         "procedural_body_micro_motion", "procedural_forest_floor", "resumable_png_render",
+        "asset_heading_correction",
     ]
     supports = {"glb": True, "gltf": True, "fbx": True, "obj": True, "animation": True, "resume": True}
     best_for = ["Adding deterministic prey movement to a Blender world built by blender_world"]
@@ -49,6 +51,13 @@ class CatPreyBlender(BaseTool):
             "blend_path": {"type": "string"},
             "output_path": {"type": "string"},
             "target_height": {"type": "number", "exclusiveMinimum": 0, "default": 0.34},
+            "heading_offset_degrees": {
+                "type": "number",
+                "minimum": -360,
+                "maximum": 360,
+                "default": 0,
+                "description": "Asset-local forward-axis correction added to generated path headings.",
+            },
             "fps": {"type": "integer", "minimum": 1, "maximum": 120},
             "start_frame": {"type": "integer", "minimum": 1},
             "end_frame": {"type": "integer", "minimum": 1},
@@ -73,7 +82,7 @@ class CatPreyBlender(BaseTool):
     resource_profile = ResourceProfile(cpu_cores=8, ram_mb=8192, vram_mb=6000, disk_mb=20000)
     idempotency_key_fields = [
         "operation", "base_blend_path", "asset_path", "motion_plan", "motion_plan_path",
-        "target_height", "start_frame", "end_frame",
+        "target_height", "heading_offset_degrees", "start_frame", "end_frame",
     ]
     side_effects = ["writes a .blend project", "may render a resumable PNG image sequence"]
     user_visible_verification = ["Review a 10-15 second sample before a long Cat TV render"]
@@ -116,6 +125,15 @@ class CatPreyBlender(BaseTool):
                 return ToolResult(success=False, error=f"Could not read motion plan: {exc}")
         if not plan or not isinstance(plan.get("keyframes"), list):
             return ToolResult(success=False, error="motion_plan or motion_plan_path with keyframes is required")
+
+        heading_offset = float(inputs.get("heading_offset_degrees", 0.0))
+        if heading_offset:
+            plan = copy.deepcopy(plan)
+            for keyframe in plan.get("keyframes", []):
+                keyframe["heading_degrees"] = (
+                    float(keyframe.get("heading_degrees", 0.0)) + heading_offset
+                ) % 360.0
+            plan["asset_heading_offset_degrees"] = heading_offset
 
         try:
             duration = float(plan.get("duration_seconds"))
@@ -165,10 +183,11 @@ class CatPreyBlender(BaseTool):
                             "start_frame": requested_start,
                             "end_frame": requested_end,
                             "resumed": False,
+                            "heading_offset_degrees": heading_offset,
                         },
                         artifacts=[str(resolved_output.parent)],
                         seed=plan.get("seed"),
-                        model="blender-eevee-cat-tv-v3",
+                        model="blender-eevee-cat-tv-v4",
                     )
                 effective_start = missing
 
@@ -263,9 +282,10 @@ class CatPreyBlender(BaseTool):
                 "end_frame": requested_end,
                 "resumed": effective_start > requested_start,
                 "frames_rendered": frame_count,
+                "heading_offset_degrees": heading_offset,
             },
             artifacts=artifacts,
             duration_seconds=round(time.time() - started, 2),
             seed=plan.get("seed"),
-            model="blender-eevee-cat-tv-v3",
+            model="blender-eevee-cat-tv-v4",
         )
