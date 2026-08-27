@@ -27,6 +27,10 @@ def args_after_separator() -> argparse.Namespace:
     parser.add_argument("--leaf-count", type=int, default=180)
     parser.add_argument("--twig-count", type=int, default=28)
     parser.add_argument("--stone-count", type=int, default=14)
+    parser.add_argument("--surface-asset", default="")
+    parser.add_argument("--surface-target-size", type=float, default=14.0)
+    parser.add_argument("--surface-z-offset", type=float, default=0.02)
+    parser.add_argument("--surface-rotation-degrees", type=float, default=0.0)
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1 :])
 
 
@@ -114,8 +118,11 @@ def add_ground_extension(size: float) -> str:
 
 def ground_height(x: float, y: float) -> float:
     """Raycast to the visible ground while ignoring Cat TV litter itself."""
-    litter = [obj for obj in bpy.context.scene.objects if obj.name.startswith("CAT_TV_LITTER_")]
-    states = [(obj, obj.hide_viewport) for obj in litter]
+    ignored = [
+        obj for obj in bpy.context.scene.objects
+        if obj.name.startswith("CAT_TV_LITTER_")
+    ]
+    states = [(obj, obj.hide_viewport) for obj in ignored]
     for obj, _state in states:
         obj.hide_viewport = True
     bpy.context.view_layer.update()
@@ -132,6 +139,75 @@ def ground_height(x: float, y: float) -> float:
         for obj, state in states:
             obj.hide_viewport = state
         bpy.context.view_layer.update()
+
+
+def import_surface_asset(path: Path, target_size: float, z_offset: float, rotation_degrees: float) -> dict:
+    """Import and normalize a real forest-floor asset over the procedural safety terrain."""
+    base_ground = ground_height(0.0, 0.0)
+    before = set(bpy.context.scene.objects)
+    suffix = path.suffix.lower()
+    if suffix in {".glb", ".gltf"}:
+        bpy.ops.import_scene.gltf(filepath=str(path))
+    elif suffix == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=str(path))
+    elif suffix == ".obj":
+        bpy.ops.wm.obj_import(filepath=str(path))
+    else:
+        raise ValueError(f"Unsupported surface asset format: {path}")
+
+    imported = [obj for obj in bpy.context.scene.objects if obj not in before]
+    if not imported:
+        raise RuntimeError("Surface asset import created no Blender objects")
+
+    root = bpy.data.objects.new("CAT_TV_SURFACE_ROOT", None)
+    bpy.context.collection.objects.link(root)
+    imported_set = set(imported)
+    for obj in imported:
+        if obj.parent not in imported_set:
+            matrix_world = obj.matrix_world.copy()
+            obj.parent = root
+            obj.matrix_world = matrix_world
+        if obj.type == "MESH":
+            for polygon in obj.data.polygons:
+                polygon.use_smooth = True
+
+    points = []
+    for obj in imported:
+        if obj.type == "MESH":
+            points.extend(obj.matrix_world @ Vector(corner) for corner in obj.bound_box)
+    if not points:
+        raise RuntimeError("Surface asset contains no mesh bounding boxes")
+
+    xmin, xmax = min(p.x for p in points), max(p.x for p in points)
+    ymin, ymax = min(p.y for p in points), max(p.y for p in points)
+    zmin, zmax = min(p.z for p in points), max(p.z for p in points)
+    source_size = max(0.001, xmax - xmin, ymax - ymin)
+    scale = float(target_size) / source_size
+    cx, cy = (xmin + xmax) * 0.5, (ymin + ymax) * 0.5
+    angle = math.radians(float(rotation_degrees))
+    scaled_cx, scaled_cy = cx * scale, cy * scale
+    rotated_cx = scaled_cx * math.cos(angle) - scaled_cy * math.sin(angle)
+    rotated_cy = scaled_cx * math.sin(angle) + scaled_cy * math.cos(angle)
+
+    root.scale = (scale, scale, scale)
+    root.rotation_euler[2] = angle
+    root.location = (
+        -rotated_cx,
+        -rotated_cy,
+        base_ground + float(z_offset) - zmin * scale,
+    )
+    bpy.context.view_layer.update()
+
+    return {
+        "path": str(path),
+        "objects": len(imported),
+        "target_size": float(target_size),
+        "source_xy_size": source_size,
+        "source_height": zmax - zmin,
+        "scale": scale,
+        "rotation_degrees": float(rotation_degrees),
+        "z_offset": float(z_offset),
+    }
 
 
 def terrain_bounds() -> tuple[float, float, float, float]:
@@ -221,7 +297,6 @@ def scatter_static_litter(seed: int, leaf_count: int, twig_count: int, stone_cou
     report = {"leaves": 0, "twigs": 0, "stones": 0}
     report_key = {"leaf": "leaves", "twig": "twigs", "stone": "stones"}
 
-    # Leaves form small irregular clusters instead of a uniform polka-dot field.
     cluster_count = max(8, min(28, leaf_count // 8 if leaf_count else 8))
     clusters = [
         (rng.uniform(xmin, xmax), rng.uniform(ymin, ymax), rng.uniform(0.45, 1.25))
@@ -273,6 +348,14 @@ def main() -> None:
     args = args_after_separator()
     terrain_report = polish_terrain(args.seed)
     extension = add_ground_extension(args.extension_size)
+    surface_report = None
+    if args.surface_asset:
+        surface_report = import_surface_asset(
+            Path(args.surface_asset).expanduser().resolve(),
+            args.surface_target_size,
+            args.surface_z_offset,
+            args.surface_rotation_degrees,
+        )
     litter_report = scatter_static_litter(args.seed, args.leaf_count, args.twig_count, args.stone_count)
     tune_world_background()
 
@@ -280,10 +363,11 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(output))
     report = {
-        "version": "1.0",
+        "version": "2.0",
         "seed": args.seed,
         "terrain": terrain_report,
         "ground_extension": extension,
+        "surface_asset": surface_report,
         "static_litter": litter_report,
         "blend_path": str(output),
     }
