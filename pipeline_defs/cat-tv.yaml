@@ -1,0 +1,196 @@
+name: cat-tv
+version: "0.1"
+description: >
+  Deterministic long-form Cat TV pipeline. Generates renderer-neutral prey motion,
+  builds a reusable Blender environment, applies motion to a licensed prey mesh,
+  renders sample-first production frames, and composes long-form outputs without
+  depending on paid generative-video APIs for the core footage.
+category: animation
+stability: beta
+default_checkpoint_policy: guided
+
+reference_input:
+  supported: true
+  analysis_depth: standard
+  analysis_tools:
+    - video_analyzer
+    - scene_detect
+    - frame_sampler
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - creative/cat-tv-production
+  - pipelines/animation/executive-producer
+  - pipelines/animation/proposal-director
+  - pipelines/animation/scene-director
+  - pipelines/animation/asset-director
+  - pipelines/animation/edit-director
+  - pipelines/animation/compose-director
+  - pipelines/animation/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/animation/executive-producer
+  budget_default_usd: 0.00
+  max_revisions_per_stage: 3
+  max_send_backs: 3
+  max_wall_time_minutes: 30
+
+compatible_playbooks:
+  recommended:
+    - clean-professional
+  also_works:
+    - minimalist-diagram
+  custom_allowed: true
+
+stages:
+  - name: proposal
+    skill: pipelines/animation/proposal-director
+    produces:
+      - proposal_packet
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Prey type, environment, duration, resolution, fps, and camera policy are explicit
+      - Procedural Blender route is preferred over paid video generation for core footage
+      - A 10-15 second sample is planned before long-form rendering
+      - Productions longer than 600 seconds are segmented for rendering and stitching
+    success_criteria:
+      - Schema-valid proposal_packet
+      - Approval recorded before asset generation
+    sub_stages:
+      - name: sample
+        description: "10-15 second Cat TV motion and render proof"
+        condition: "approved_concept_exists"
+        human_approval_default: true
+        tools_available:
+          - cat_prey_motion
+          - blender_world
+          - cat_prey_blender
+          - video_compose
+        review_focus:
+          - Prey remains trackable and correctly grounded
+          - Motion contains pauses, bursts, hiding, exits, and re-entry without flicker
+          - Camera framing works at final aspect ratio
+
+  - name: scene_plan
+    skill: pipelines/animation/scene-director
+    required_artifacts_in:
+      - proposal_packet
+    produces:
+      - scene_plan
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Timeline is expressed as continuous hunt beats rather than rapid editorial cuts
+      - Fixed or stable camera is the default
+      - Seed strategy is explicit for each render segment
+    success_criteria:
+      - Schema-valid scene_plan
+
+  - name: assets
+    skill: pipelines/animation/asset-director
+    required_artifacts_in:
+      - scene_plan
+    optional_artifacts_in:
+      - proposal_packet
+    produces:
+      - asset_manifest
+    optional_tools:
+      - threejs_asset_catalog
+      - atlas_3d
+      - fal_3d
+    tools_available:
+      - cat_prey_motion
+      - blender_world
+      - cat_prey_blender
+      - threejs_asset_catalog
+      - atlas_3d
+      - fal_3d
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Motion plan is persisted with seed and configuration
+      - Prey mesh license/source is recorded
+      - Blender world and prey scale are reviewed in a short sample
+      - No unsupported prey type is silently substituted
+    success_criteria:
+      - Schema-valid asset_manifest
+      - All referenced local assets exist
+      - Motion plan and editable blend project are retained
+
+  - name: edit
+    skill: pipelines/animation/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    produces:
+      - edit_decisions
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Seed and approved motion timings are preserved
+      - Segment boundaries do not create obvious repetitive loops
+      - Narration, text, and music remain disabled unless explicitly approved
+    success_criteria:
+      - Schema-valid edit_decisions
+
+  - name: compose
+    skill: pipelines/animation/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+    optional_tools:
+      - audio_mixer
+      - video_stitch
+    tools_available:
+      - cat_prey_blender
+      - video_compose
+      - audio_mixer
+      - video_stitch
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Final output passes ffprobe validation
+      - No strobing, full-frame flashing, clipping, or broken visibility transitions are present
+      - Audio, when present, is subtle and does not introduce narration by default
+      - Long-form segments stitch without frame-size or fps mismatches
+    success_criteria:
+      - Schema-valid render_report
+      - Output exists and self-review is completed
+
+  - name: publish
+    skill: pipelines/animation/publish-director
+    required_artifacts_in:
+      - render_report
+      - final_review
+    optional_artifacts_in:
+      - proposal_packet
+    produces:
+      - publish_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Metadata accurately describes prey/environment/duration
+      - Thumbnail represents the actual rendered environment
+    success_criteria:
+      - Schema-valid publish_log
