@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openmontage/tools/cat_tv_world_polish",
+  "title": "Cat TV World Polish Input",
+  "type": "object",
+  "required": ["operation"],
+  "properties": {
+    "operation": {"type": "string", "enum": ["polish", "doctor"]},
+    "base_blend_path": {"type": "string"},
+    "blend_path": {"type": "string"},
+    "seed": {"type": "integer", "default": 184321},
+    "extension_size": {"type": "number", "minimum": 40, "default": 100},
+    "leaf_count": {"type": "integer", "minimum": 0, "maximum": 600, "default": 180},
+    "twig_count": {"type": "integer", "minimum": 0, "maximum": 200, "default": 28},
+    "stone_count": {"type": "integer", "minimum": 0, "maximum": 100, "default": 14}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"operation": {"const": "polish"}}},
+      "then": {"required": ["base_blend_path", "blend_path"]}
+    }
+  ],
+  "additionalProperties": false
+}
