@@ -1,10 +1,11 @@
 name: cat-tv
-version: "0.1"
+version: "0.2"
 description: >
   Deterministic long-form Cat TV pipeline. Generates renderer-neutral prey motion,
   builds a reusable Blender environment, applies motion to a licensed prey mesh,
-  renders sample-first production frames, and composes long-form outputs without
-  depending on paid generative-video APIs for the core footage.
+  renders sample-first resumable PNG sequences, validates representative frames,
+  and composes long-form outputs without depending on paid generative-video APIs
+  for the core footage.
 category: animation
 stability: beta
 default_checkpoint_policy: guided
@@ -41,7 +42,7 @@ orchestration:
   budget_default_usd: 0.00
   max_revisions_per_stage: 3
   max_send_backs: 3
-  max_wall_time_minutes: 30
+  max_wall_time_minutes: 180
 
 compatible_playbooks:
   recommended:
@@ -64,6 +65,7 @@ stages:
       - Procedural Blender route is preferred over paid video generation for core footage
       - A 10-15 second sample is planned before long-form rendering
       - Productions longer than 600 seconds are segmented for rendering and stitching
+      - Local long renders favor 120-300 second segments for cheap recovery, while 600 seconds remains the hard per-plan limit
     success_criteria:
       - Schema-valid proposal_packet
       - Approval recorded before asset generation
@@ -77,10 +79,13 @@ stages:
           - blender_world
           - cat_prey_blender
           - video_compose
+          - frame_sampler
+          - visual_qa
         review_focus:
           - Prey remains trackable and correctly grounded
           - Motion contains pauses, bursts, hiding, exits, and re-entry without flicker
           - Camera framing works at final aspect ratio
+          - Terrain edges and obvious procedural artifacts are absent
 
   - name: scene_plan
     skill: pipelines/animation/scene-director
@@ -94,7 +99,8 @@ stages:
     review_focus:
       - Timeline is expressed as continuous hunt beats rather than rapid editorial cuts
       - Fixed or stable camera is the default
-      - Seed strategy is explicit for each render segment
+      - Seed strategy is explicit for every render segment
+      - Segment boundaries occur at safe beats such as edge exits, hidden prey, or calm holds
     success_criteria:
       - Schema-valid scene_plan
 
@@ -143,6 +149,7 @@ stages:
       - Seed and approved motion timings are preserved
       - Segment boundaries do not create obvious repetitive loops
       - Narration, text, and music remain disabled unless explicitly approved
+      - Resolution and fps stay identical across all segments
     success_criteria:
       - Schema-valid edit_decisions
 
@@ -161,18 +168,26 @@ stages:
     optional_tools:
       - audio_mixer
       - video_stitch
+      - frame_sampler
+      - visual_qa
+      - composition_validator
     tools_available:
       - cat_prey_blender
       - video_compose
       - audio_mixer
       - video_stitch
+      - frame_sampler
+      - visual_qa
+      - composition_validator
     checkpoint_required: true
     human_approval_default: false
     review_focus:
-      - Final output passes ffprobe validation
-      - No strobing, full-frame flashing, clipping, or broken visibility transitions are present
+      - Blender PNG sequences are resumable and complete before encoding
+      - Final output passes ffprobe/composition validation
+      - Representative frames from the beginning, middle, end, and segment joins pass visual review
+      - No strobing, full-frame flashing, clipping, terrain-edge exposure, or broken visibility transitions are present
       - Audio, when present, is subtle and does not introduce narration by default
-      - Long-form segments stitch without frame-size or fps mismatches
+      - Long-form segments stitch without frame-size, fps, or color-space mismatches
     success_criteria:
       - Schema-valid render_report
       - Output exists and self-review is completed
@@ -192,5 +207,6 @@ stages:
     review_focus:
       - Metadata accurately describes prey/environment/duration
       - Thumbnail represents the actual rendered environment
+      - Delivery encode is derived from a retained high-quality master
     success_criteria:
       - Schema-valid publish_log
