@@ -286,6 +286,27 @@ def look_at(obj, target):
     obj.rotation_euler = (Vector(target) - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
+def iter_action_fcurves(obj):
+    """Return action F-Curves across Blender 4.x legacy and Blender 5.x slotted Actions."""
+    animation_data = obj.animation_data
+    if not animation_data or not animation_data.action:
+        return []
+    action = animation_data.action
+    if hasattr(action, "fcurves"):
+        return action.fcurves
+    slot = getattr(animation_data, "action_slot", None)
+    if slot is None:
+        return []
+    for layer in action.layers:
+        for strip in layer.strips:
+            if not hasattr(strip, "channelbag"):
+                continue
+            channelbag = strip.channelbag(slot)
+            if channelbag is not None:
+                return channelbag.fcurves
+    return []
+
+
 def setup_camera_and_lights(spec: dict, args: argparse.Namespace):
     camera_spec = spec.get("camera", {})
     camera_data = bpy.data.cameras.new("HeroCamera")
@@ -317,7 +338,7 @@ def setup_camera_and_lights(spec: dict, args: argparse.Namespace):
         camera.keyframe_insert("location", frame=frame)
         target.keyframe_insert("location", frame=frame)
     for animated in (camera, target):
-        for curve in animated.animation_data.action.fcurves if animated.animation_data and animated.animation_data.action else []:
+        for curve in iter_action_fcurves(animated):
             for point in curve.keyframe_points:
                 point.interpolation = "BEZIER"
 
@@ -374,10 +395,23 @@ def setup_title(spec: dict, args: argparse.Namespace):
     text.keyframe_insert("hide_viewport", frame=start_frame)
 
 
-def setup_render(args: argparse.Namespace):
+def select_eevee_engine(scene) -> str:
+    """Select Eevee across Blender 4.5 and Blender 5.x."""
+    errors = []
+    for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
+        try:
+            scene.render.engine = candidate
+            return candidate
+        except (TypeError, ValueError) as exc:
+            errors.append(f"{candidate}: {exc}")
+    raise RuntimeError("No supported Eevee render engine found; " + "; ".join(errors))
+
+
+def setup_render(args: argparse.Namespace) -> str:
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
-    scene.eevee.taa_render_samples = args.samples
+    engine = select_eevee_engine(scene)
+    if hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
+        scene.eevee.taa_render_samples = args.samples
     scene.render.resolution_x = args.width
     scene.render.resolution_y = args.height
     scene.render.resolution_percentage = 100
@@ -389,6 +423,7 @@ def setup_render(args: argparse.Namespace):
     scene.render.image_settings.color_mode = "RGBA"
     scene.view_settings.look = "AgX - Medium High Contrast"
     scene.render.filepath = args.output
+    return engine
 
 
 def build(spec: dict, args: argparse.Namespace):
@@ -408,11 +443,12 @@ def build(spec: dict, args: argparse.Namespace):
     report = scatter_assets(spec)
     setup_camera_and_lights(spec, args)
     setup_title(spec, args)
-    setup_render(args)
+    engine = setup_render(args)
     bpy.ops.wm.save_as_mainfile(filepath=args.blend)
     Path(args.blend).with_suffix(".report.json").write_text(json.dumps({
-        "version": "1.0", "engine": "BLENDER_EEVEE_NEXT", "seed": spec.get("seed"), **report,
+        "version": "1.1", "engine": engine, "seed": spec.get("seed"), **report,
     }, indent=2), encoding="utf-8")
+    report["engine"] = engine
     return report
 
 
