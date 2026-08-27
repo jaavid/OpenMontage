@@ -29,7 +29,7 @@ class CatTVWorldPolish(BaseTool):
     """Create a stable, reusable Cat TV environment before prey segments render."""
 
     name = "cat_tv_world_polish"
-    version = "0.1.0"
+    version = "0.2.0"
     tier = ToolTier.GENERATE
     capability = "cat_tv_world_polish"
     provider = "blender"
@@ -43,10 +43,11 @@ class CatTVWorldPolish(BaseTool):
         "stable_environment_seed",
         "organic_terrain_palette",
         "static_forest_floor",
+        "external_forest_floor_asset",
         "terrain_edge_guard",
         "reusable_long_form_world",
     ]
-    supports = {"resume": False, "editable_blend": True, "offline": True}
+    supports = {"resume": False, "editable_blend": True, "offline": True, "glb": True, "gltf": True, "fbx": True, "obj": True}
     best_for = ["Polishing one Blender base world that is reused by every Cat TV render segment"]
     not_good_for = ["Animating prey", "Generating external photorealistic assets"]
     input_schema = {
@@ -61,6 +62,10 @@ class CatTVWorldPolish(BaseTool):
             "leaf_count": {"type": "integer", "minimum": 0, "maximum": 600, "default": 180},
             "twig_count": {"type": "integer", "minimum": 0, "maximum": 200, "default": 28},
             "stone_count": {"type": "integer", "minimum": 0, "maximum": 100, "default": 14},
+            "surface_asset_path": {"type": "string"},
+            "surface_target_size": {"type": "number", "exclusiveMinimum": 0, "default": 14},
+            "surface_z_offset": {"type": "number", "default": 0.02},
+            "surface_rotation_degrees": {"type": "number", "default": 0},
         },
         "allOf": [
             {
@@ -73,7 +78,10 @@ class CatTVWorldPolish(BaseTool):
     output_schema = {"type": "object"}
     artifact_schema = {"artifact": "3d_world"}
     resource_profile = ResourceProfile(cpu_cores=4, ram_mb=4096, vram_mb=2048, disk_mb=5000)
-    idempotency_key_fields = ["base_blend_path", "seed", "extension_size", "leaf_count", "twig_count", "stone_count"]
+    idempotency_key_fields = [
+        "base_blend_path", "seed", "extension_size", "leaf_count", "twig_count", "stone_count",
+        "surface_asset_path", "surface_target_size", "surface_z_offset", "surface_rotation_degrees",
+    ]
     side_effects = ["writes a polished .blend project and JSON report"]
     user_visible_verification = ["Review a final-resolution sample and verify that terrain edges and obvious procedural patterns are absent"]
     quality_score = 0.96
@@ -100,6 +108,11 @@ class CatTVWorldPolish(BaseTool):
             return ToolResult(success=False, error=f"Base blend file not found: {base_blend}")
         output_blend.parent.mkdir(parents=True, exist_ok=True)
 
+        surface_raw = str(inputs.get("surface_asset_path") or "").strip()
+        surface_asset = Path(surface_raw).expanduser().resolve() if surface_raw else None
+        if surface_asset is not None and not surface_asset.is_file():
+            return ToolResult(success=False, error=f"Surface asset not found: {surface_asset}")
+
         command = [
             str(blender),
             "--background",
@@ -119,7 +132,15 @@ class CatTVWorldPolish(BaseTool):
             str(int(inputs.get("twig_count", 28))),
             "--stone-count",
             str(int(inputs.get("stone_count", 14))),
+            "--surface-target-size",
+            str(float(inputs.get("surface_target_size", 14))),
+            "--surface-z-offset",
+            str(float(inputs.get("surface_z_offset", 0.02))),
+            "--surface-rotation-degrees",
+            str(float(inputs.get("surface_rotation_degrees", 0))),
         ]
+        if surface_asset is not None:
+            command.extend(["--surface-asset", str(surface_asset)])
 
         started = time.time()
         try:
@@ -148,6 +169,7 @@ class CatTVWorldPolish(BaseTool):
             "blend_path": str(output_blend),
             "report": str(report_path),
             "seed": int(inputs.get("seed", 184321)),
+            "surface_asset_path": str(surface_asset) if surface_asset else None,
         }
         if report_path.is_file():
             try:
@@ -163,5 +185,5 @@ class CatTVWorldPolish(BaseTool):
             artifacts=artifacts,
             duration_seconds=round(time.time() - started, 2),
             seed=int(inputs.get("seed", 184321)),
-            model="blender-cat-tv-world-polish-v1",
+            model="blender-cat-tv-world-polish-v2",
         )
