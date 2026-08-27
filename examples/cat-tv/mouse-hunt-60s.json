@@ -23,8 +23,8 @@
       "seed": 184321,
       "fps": 60,
       "terrain": {
-        "size": 22,
-        "resolution": 128,
+        "size": 36,
+        "resolution": 160,
         "height_scale": 0.14,
         "frequency": 0.052,
         "palette": [
