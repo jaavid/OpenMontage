@@ -20,7 +20,7 @@ _RUNTIME_SCRIPT = Path(__file__).resolve().parent / "templates" / "cat-prey-runt
 
 class CatPreyBlender(BaseTool):
     name = "cat_prey_blender"
-    version = "0.3.0"
+    version = "0.3.1"
     tier = ToolTier.GENERATE
     capability = "prey_animation_rendering"
     provider = "blender"
@@ -39,7 +39,7 @@ class CatPreyBlender(BaseTool):
     not_good_for = ["Generating the prey mesh itself"]
     input_schema = {
         "type": "object",
-        "required": ["operation", "base_blend_path", "asset_path"],
+        "required": ["operation"],
         "properties": {
             "operation": {"type": "string", "enum": ["apply", "render_animation", "doctor"]},
             "base_blend_path": {"type": "string"},
@@ -57,6 +57,16 @@ class CatPreyBlender(BaseTool):
             "seconds_per_frame_budget": {"type": "number", "minimum": 1, "default": 8.0},
             "decorate_world": {"type": "boolean", "default": True},
         },
+        "allOf": [
+            {
+                "if": {"properties": {"operation": {"enum": ["apply", "render_animation"]}}},
+                "then": {"required": ["base_blend_path", "asset_path"]},
+            },
+            {
+                "if": {"properties": {"operation": {"const": "render_animation"}}},
+                "then": {"required": ["output_path"]},
+            },
+        ],
     }
     output_schema = {"type": "object"}
     artifact_schema = {"artifact": "3d_world"}
@@ -107,6 +117,16 @@ class CatPreyBlender(BaseTool):
         if not plan or not isinstance(plan.get("keyframes"), list):
             return ToolResult(success=False, error="motion_plan or motion_plan_path with keyframes is required")
 
+        try:
+            duration = float(plan.get("duration_seconds"))
+            fps = int(inputs.get("fps") or plan.get("fps"))
+        except (TypeError, ValueError):
+            return ToolResult(success=False, error="Motion plan must provide numeric duration_seconds and fps")
+        if duration < 10 or duration > 600:
+            return ToolResult(success=False, error="Motion plan duration_seconds must be between 10 and 600")
+        if fps < 1 or fps > 120:
+            return ToolResult(success=False, error="Motion plan fps must be between 1 and 120")
+
         blend_path = Path(
             str(inputs.get("blend_path") or base_blend.with_name(base_blend.stem + "-cat-tv.blend"))
         ).expanduser().resolve()
@@ -114,10 +134,16 @@ class CatPreyBlender(BaseTool):
         serialized_plan = blend_path.with_suffix(".motion.json")
         serialized_plan.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        fps = int(inputs.get("fps") or plan.get("fps") or 60)
-        duration = float(plan.get("duration_seconds") or 60)
         requested_start = int(inputs.get("start_frame") or 1)
         requested_end = int(inputs.get("end_frame") or round(duration * fps))
+        max_frame = max(1, round(duration * fps))
+        if requested_start < 1 or requested_end < requested_start:
+            return ToolResult(success=False, error="Invalid render frame range")
+        if requested_end > max_frame:
+            return ToolResult(
+                success=False,
+                error=f"end_frame {requested_end} exceeds motion plan frame budget {max_frame}",
+            )
         effective_start = requested_start
 
         output_path = inputs.get("output_path")
