@@ -1,7 +1,7 @@
 {
   "name": "mouse-hunt-60s",
   "pipeline": "cat-tv",
-  "description": "Deterministic 60-second Cat TV mouse-hunt production recipe with a procedural forest floor, low-angle framing, and resumable rendering.",
+  "description": "Production-oriented 60-second Cat TV mouse hunt with a reusable polished forest floor, stable camera, seeded prey behavior, and resumable rendering.",
   "motion": {
     "operation": "generate",
     "prey_type": "mouse",
@@ -23,34 +23,44 @@
       "seed": 184321,
       "fps": 60,
       "terrain": {
-        "size": 36,
-        "resolution": 160,
-        "height_scale": 0.14,
-        "frequency": 0.052,
+        "size": 64,
+        "resolution": 220,
+        "height_scale": 0.10,
+        "frequency": 0.038,
         "palette": [
-          [0.19, 0.28, 0.105, 1.0],
-          [0.28, 0.34, 0.12, 1.0],
-          [0.31, 0.22, 0.105, 1.0]
+          [0.19, 0.27, 0.10, 1.0],
+          [0.25, 0.31, 0.12, 1.0],
+          [0.27, 0.21, 0.10, 1.0]
         ]
       },
       "camera": {
-        "position": [0.0, -10.3, 3.9],
-        "target": [0.0, 0.6, 0.14],
-        "lens": 46
+        "position": [0.0, -10.8, 4.25],
+        "target": [0.0, 0.8, 0.08],
+        "lens": 50
       },
       "lighting": {
-        "sun_energy": 2.35,
-        "sun_angle_degrees": 32,
-        "sun_rotation_degrees": [36, -24, -31],
-        "fill_energy": 780,
-        "world_color": [0.17, 0.21, 0.115, 1],
-        "world_strength": 0.58
+        "sun_energy": 2.15,
+        "sun_angle_degrees": 38,
+        "sun_rotation_degrees": [38, -22, -30],
+        "fill_energy": 720,
+        "world_color": [0.18, 0.245, 0.095, 1],
+        "world_strength": 0.42
       }
     }
   },
+  "world_polish": {
+    "operation": "polish",
+    "base_blend_path": "projects/cat-tv/mouse-hunt-60s/base.blend",
+    "blend_path": "projects/cat-tv/mouse-hunt-60s/base-polished.blend",
+    "seed": 184321,
+    "extension_size": 110,
+    "leaf_count": 180,
+    "twig_count": 28,
+    "stone_count": 14
+  },
   "prey_render": {
     "operation": "render_animation",
-    "base_blend_path": "projects/cat-tv/mouse-hunt-60s/base.blend",
+    "base_blend_path": "projects/cat-tv/mouse-hunt-60s/base-polished.blend",
     "asset_path": "${MOUSE_GLB_PATH}",
     "motion_plan_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json",
     "blend_path": "projects/cat-tv/mouse-hunt-60s/mouse-hunt.blend",
@@ -61,7 +71,7 @@
     "end_frame": 3600,
     "resume": true,
     "seconds_per_frame_budget": 8.0,
-    "decorate_world": true
+    "decorate_world": false
   },
   "sample_policy": {
     "required": true,
@@ -73,9 +83,18 @@
       "visibility transitions",
       "camera framing has no visible terrain edge or horizon break",
       "motion variety",
-      "forest-floor detail reads as organic rather than circular color patches",
+      "forest-floor detail reads as organic and remains stable between segments",
       "background contrast without visual clutter",
       "absence of flicker or clipping"
     ]
+  },
+  "delivery": {
+    "segment_seconds": 300,
+    "video_codec": "libx264",
+    "crf": 16,
+    "preset": "slow",
+    "pixel_format": "yuv420p",
+    "stitch_transition": "cut",
+    "audio_policy": "subtle natural ambience only; no narration, text, or music by default"
   }
 }
