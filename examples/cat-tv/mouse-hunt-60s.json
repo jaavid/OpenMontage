@@ -1,7 +1,7 @@
 {
   "name": "mouse-hunt-60s",
   "pipeline": "cat-tv",
-  "description": "Deterministic 60-second Cat TV mouse-hunt production recipe, tuned for prey readability and natural low-angle framing.",
+  "description": "Deterministic 60-second Cat TV mouse-hunt production recipe with a procedural forest floor, low-angle framing, and resumable rendering.",
   "motion": {
     "operation": "generate",
     "prey_type": "mouse",
@@ -24,53 +24,28 @@
       "seed": 184321,
       "fps": 60,
       "terrain": {
-        "size": 12,
-        "resolution": 112,
-        "height_scale": 0.20,
-        "frequency": 0.065,
+        "size": 22,
+        "resolution": 128,
+        "height_scale": 0.14,
+        "frequency": 0.052,
         "palette": [
-          [0.20, 0.31, 0.11, 1.0],
-          [0.31, 0.39, 0.14, 1.0],
-          [0.38, 0.27, 0.14, 1.0]
+          [0.19, 0.28, 0.105, 1.0],
+          [0.28, 0.34, 0.12, 1.0],
+          [0.31, 0.22, 0.105, 1.0]
         ]
       },
-      "regions": [
-        {
-          "id": "leaf-litter-left",
-          "center": [-2.4, 0.8],
-          "radius": 3.0,
-          "color": [0.36, 0.26, 0.13, 1.0],
-          "roughness": 0.96,
-          "height_offset": 0.015
-        },
-        {
-          "id": "moss-center",
-          "center": [1.4, -0.2],
-          "radius": 2.8,
-          "color": [0.27, 0.38, 0.13, 1.0],
-          "roughness": 0.94,
-          "height_offset": 0.01
-        },
-        {
-          "id": "dry-ground-right",
-          "center": [3.0, 1.1],
-          "radius": 2.2,
-          "color": [0.42, 0.31, 0.16, 1.0],
-          "roughness": 0.97
-        }
-      ],
       "camera": {
-        "position": [0.0, -9.4, 4.8],
-        "target": [0.0, 0.0, 0.16],
-        "lens": 42
+        "position": [0.0, -10.3, 3.9],
+        "target": [0.0, 0.6, 0.14],
+        "lens": 46
       },
       "lighting": {
-        "sun_energy": 2.5,
-        "sun_angle_degrees": 28,
-        "sun_rotation_degrees": [34, -22, -30],
-        "fill_energy": 900,
-        "world_color": [0.18, 0.22, 0.12, 1],
-        "world_strength": 0.62
+        "sun_energy": 2.35,
+        "sun_angle_degrees": 32,
+        "sun_rotation_degrees": [36, -24, -31],
+        "fill_energy": 780,
+        "world_color": [0.17, 0.21, 0.115, 1],
+        "world_strength": 0.58
       }
     }
   },
@@ -84,7 +59,10 @@
     "target_height": 0.34,
     "fps": 60,
     "start_frame": 1,
-    "end_frame": 3600
+    "end_frame": 3600,
+    "resume": true,
+    "seconds_per_frame_budget": 8.0,
+    "decorate_world": true
   },
   "sample_policy": {
     "required": true,
@@ -92,10 +70,11 @@
     "review": [
       "prey occupies a clearly trackable portion of the frame",
       "prey scale and ground contact",
-      "body bob and tilt reduce the sliding impression",
+      "body motion reduces the sliding impression without excessive bouncing",
       "visibility transitions",
-      "camera framing",
+      "camera framing has no visible terrain edge or horizon break",
       "motion variety",
+      "forest-floor detail reads as organic rather than circular color patches",
       "background contrast without visual clutter",
       "absence of flicker or clipping"
     ]
