@@ -41,6 +41,7 @@ def select_eevee_engine(scene) -> str:
 
 
 def material(name: str, color: tuple[float, float, float, float], roughness: float = 0.9):
+    """Return or create a simple rough Principled material."""
     mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     mat.diffuse_color = color
     mat.use_nodes = True
@@ -52,6 +53,7 @@ def material(name: str, color: tuple[float, float, float, float], roughness: flo
 
 
 def import_asset(path: Path):
+    """Import a prey asset and return path/body roots plus size metadata."""
     before = set(bpy.context.scene.objects)
     suffix = path.suffix.lower()
     if suffix in {".glb", ".gltf"}:
@@ -97,6 +99,7 @@ def import_asset(path: Path):
 
 
 def ground_height(x: float, y: float, hidden_objects: list | None = None) -> float:
+    """Raycast downward to the first visible ground surface."""
     hidden_objects = list(hidden_objects or [])
     states = [(obj, obj.hide_viewport) for obj in hidden_objects]
     for obj, _state in states:
@@ -115,6 +118,7 @@ def ground_height(x: float, y: float, hidden_objects: list | None = None) -> flo
 
 
 def set_visibility(imported: list, visible: bool, frame: int) -> None:
+    """Keyframe render and viewport visibility for all imported prey objects."""
     for obj in imported:
         obj.hide_render = not visible
         obj.hide_viewport = not visible
@@ -147,11 +151,20 @@ def iter_action_fcurves(obj):
 
 
 def set_curve_interpolation(obj, frame: int, interpolation: str) -> None:
+    """Set interpolation only for keyframe points at one frame."""
     requested = interpolation if interpolation in {"CONSTANT", "LINEAR", "BEZIER"} else "LINEAR"
     for curve in iter_action_fcurves(obj):
         for point in curve.keyframe_points:
             if abs(point.co.x - frame) < 0.01:
                 point.interpolation = requested
+
+
+def set_all_curve_interpolation(obj, interpolation: str) -> None:
+    """Set all animation points on an object in one linear-time pass."""
+    requested = interpolation if interpolation in {"CONSTANT", "LINEAR", "BEZIER"} else "LINEAR"
+    for curve in iter_action_fcurves(obj):
+        for point in curve.keyframe_points:
+            point.interpolation = requested
 
 
 def micro_profile(behavior: str) -> tuple[float, float, float, float, float]:
@@ -191,12 +204,13 @@ def add_body_micro_motion(body_root, segments: list[dict], fps: int) -> int:
             body_root.rotation_euler = (pitch, roll, 0.0)
             body_root.keyframe_insert("location", frame=frame)
             body_root.keyframe_insert("rotation_euler", frame=frame)
-            set_curve_interpolation(body_root, frame, "BEZIER")
             inserted += 1
+    set_all_curve_interpolation(body_root, "BEZIER")
     return inserted
 
 
 def apply_motion(plan: dict, asset: Path, target_height: float, fps: int):
+    """Apply path, visibility, heading, grounding, and body micro-motion."""
     path_root, body_root, imported, source_height, source_floor = import_asset(asset)
     scale = target_height / source_height
     body_root.scale = (scale, scale, scale)
@@ -232,6 +246,7 @@ def apply_motion(plan: dict, asset: Path, target_height: float, fps: int):
 
 
 def make_mesh(name: str, vertices: list[tuple], faces: list[tuple]):
+    """Create a mesh from explicit vertices and faces."""
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(vertices, [], faces)
     mesh.update()
@@ -239,6 +254,7 @@ def make_mesh(name: str, vertices: list[tuple], faces: list[tuple]):
 
 
 def point_near_path(x: float, y: float, path_points: list[tuple[float, float]], clearance: float) -> bool:
+    """Return whether a decoration point is too close to a prey keyframe."""
     return any(math.hypot(x - px, y - py) < clearance for px, py in path_points)
 
 
@@ -253,25 +269,9 @@ def decorate_world(plan: dict, cat_objects: list) -> dict:
     ymax += 5.0
     path_points = [tuple(map(float, key.get("position", [0, 0])[:2])) for key in plan.get("keyframes", [])]
 
-    leaf_mesh = make_mesh(
-        "CAT_TV_LEAF_MESH",
-        [(-0.13, 0.0, 0.0), (0.0, 0.065, 0.008), (0.13, 0.0, 0.0), (0.0, -0.065, -0.003)],
-        [(0, 1, 2, 3)],
-    )
-    twig_mesh = make_mesh(
-        "CAT_TV_TWIG_MESH",
-        [
-            (-0.22, -0.018, -0.012), (0.22, -0.018, -0.012), (0.22, 0.018, -0.012), (-0.22, 0.018, -0.012),
-            (-0.22, -0.018, 0.012), (0.22, -0.018, 0.012), (0.22, 0.018, 0.012), (-0.22, 0.018, 0.012),
-        ],
-        [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (4, 0, 3, 7)],
-    )
-    stone_mesh = make_mesh(
-        "CAT_TV_STONE_MESH",
-        [(0, 0, 0.11), (0.11, 0, 0), (0, 0.09, 0), (-0.11, 0, 0), (0, -0.09, 0), (0, 0, -0.055)],
-        [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1), (5, 2, 1), (5, 3, 2), (5, 4, 3), (5, 1, 4)],
-    )
-
+    leaf_meshes = []
+    twig_meshes = []
+    stone_meshes = []
     leaf_mats = [
         material("CAT_TV_Leaf_Ochre", (0.34, 0.19, 0.055, 1.0), 0.96),
         material("CAT_TV_Leaf_Brown", (0.22, 0.105, 0.035, 1.0), 0.97),
@@ -285,10 +285,34 @@ def decorate_world(plan: dict, cat_objects: list) -> dict:
         material("CAT_TV_Stone_Warm", (0.19, 0.17, 0.13, 1.0), 0.90),
         material("CAT_TV_Stone_Moss", (0.15, 0.18, 0.10, 1.0), 0.92),
     ]
+    leaf_vertices = [(-0.13, 0.0, 0.0), (0.0, 0.065, 0.008), (0.13, 0.0, 0.0), (0.0, -0.065, -0.003)]
+    twig_vertices = [
+        (-0.22, -0.018, -0.012), (0.22, -0.018, -0.012), (0.22, 0.018, -0.012), (-0.22, 0.018, -0.012),
+        (-0.22, -0.018, 0.012), (0.22, -0.018, 0.012), (0.22, 0.018, 0.012), (-0.22, 0.018, 0.012),
+    ]
+    stone_vertices = [(0, 0, 0.11), (0.11, 0, 0), (0, 0.09, 0), (-0.11, 0, 0), (0, -0.09, 0), (0, 0, -0.055)]
+    for index, mat in enumerate(leaf_mats):
+        mesh = make_mesh(f"CAT_TV_LEAF_MESH_{index}", leaf_vertices, [(0, 1, 2, 3)])
+        mesh.materials.append(mat)
+        leaf_meshes.append(mesh)
+    for index, mat in enumerate(twig_mats):
+        mesh = make_mesh(
+            f"CAT_TV_TWIG_MESH_{index}", twig_vertices,
+            [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (4, 0, 3, 7)],
+        )
+        mesh.materials.append(mat)
+        twig_meshes.append(mesh)
+    for index, mat in enumerate(stone_mats):
+        mesh = make_mesh(
+            f"CAT_TV_STONE_MESH_{index}", stone_vertices,
+            [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1), (5, 2, 1), (5, 3, 2), (5, 4, 3), (5, 1, 4)],
+        )
+        mesh.materials.append(mat)
+        stone_meshes.append(mesh)
 
     created = {"leaves": 0, "twigs": 0, "stones": 0}
 
-    def spawn(kind: str, mesh, mats: list, count: int, clearance: float, z_offset: float, scale_range: tuple[float, float]):
+    def spawn(kind: str, meshes: list, count: int, clearance: float, z_offset: float, scale_range: tuple[float, float]):
         attempts = 0
         while created[kind] < count and attempts < count * 12:
             attempts += 1
@@ -297,7 +321,7 @@ def decorate_world(plan: dict, cat_objects: list) -> dict:
             if point_near_path(x, y, path_points, clearance):
                 continue
             z = ground_height(x, y, cat_objects) + z_offset
-            obj = bpy.data.objects.new(f"CAT_TV_{kind.upper()}_{created[kind]:03d}", mesh)
+            obj = bpy.data.objects.new(f"CAT_TV_{kind.upper()}_{created[kind]:03d}", rng.choice(meshes))
             bpy.context.collection.objects.link(obj)
             obj.location = (x, y, z)
             obj.rotation_euler = (
@@ -307,17 +331,16 @@ def decorate_world(plan: dict, cat_objects: list) -> dict:
             )
             scale = rng.uniform(*scale_range)
             obj.scale = (scale, scale * rng.uniform(0.75, 1.15), scale)
-            obj.data.materials.clear()
-            obj.data.materials.append(rng.choice(mats))
             created[kind] += 1
 
-    spawn("leaves", leaf_mesh, leaf_mats, 90, 0.22, 0.018, (0.65, 1.55))
-    spawn("twigs", twig_mesh, twig_mats, 28, 0.42, 0.025, (0.65, 1.35))
-    spawn("stones", stone_mesh, stone_mats, 18, 0.55, 0.055, (0.65, 1.30))
+    spawn("leaves", leaf_meshes, 90, 0.22, 0.018, (0.65, 1.55))
+    spawn("twigs", twig_meshes, 28, 0.42, 0.025, (0.65, 1.35))
+    spawn("stones", stone_meshes, 18, 0.55, 0.055, (0.65, 1.30))
     return created
 
 
 def main() -> None:
+    """Load the plan, build Cat TV additions, save the blend, and optionally render."""
     args = args_after_separator()
     motion_path = Path(args.motion).expanduser().resolve()
     asset_path = Path(args.asset).expanduser().resolve()
