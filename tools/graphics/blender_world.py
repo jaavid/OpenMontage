@@ -31,6 +31,7 @@ _RUNTIME_SCRIPT = Path(__file__).resolve().parent / "templates" / "blender-world
 
 
 def find_blender() -> Path | None:
+    """Resolve Blender from explicit config, the portable runtime, or PATH."""
     configured = os.environ.get("BLENDER_PATH")
     if configured and Path(configured).is_file():
         return Path(configured).resolve()
@@ -52,7 +53,7 @@ def first_missing_frame(output_prefix: str | Path, start_frame: int, end_frame: 
 
 class BlenderWorld(BaseTool):
     name = "blender_world"
-    version = "0.3.0"
+    version = "0.3.1"
     tier = ToolTier.GENERATE
     capability = "3d_world_rendering"
     provider = "blender"
@@ -62,7 +63,7 @@ class BlenderWorld(BaseTool):
     runtime = ToolRuntime.LOCAL_GPU
     dependencies: list[str] = []
     install_instructions = (
-        "Install Blender 4.5 LTS, set BLENDER_PATH, or place the portable runtime at "
+        "Install Blender 4.5+, set BLENDER_PATH, or place the portable runtime at "
         ".runtime/blender/blender-4.5.10-windows-x64/blender.exe."
     )
     agent_skills = [
@@ -71,7 +72,7 @@ class BlenderWorld(BaseTool):
     ]
     capabilities = [
         "gltf_glb_scene_assembly", "procedural_terrain", "linked_asset_scatter",
-        "pbr_materials", "eevee_next_render", "camera_flythrough", "blend_project_export",
+        "pbr_materials", "eevee_render", "camera_flythrough", "blend_project_export",
         "asset_unit_normalization", "bounding_box_ground_contact", "semantic_scatter_exclusions",
         "terrain_following_ribbons", "visibility_windows", "title_safe_final_hold",
     ]
@@ -83,6 +84,7 @@ class BlenderWorld(BaseTool):
         "still": True,
         "animation": True,
         "transparent_background": True,
+        "blender_5": True,
     }
     best_for = [
         "Production-quality world assembly from many generated and licensed assets",
@@ -121,14 +123,17 @@ class BlenderWorld(BaseTool):
     quality_score = 0.94
 
     def get_status(self) -> ToolStatus:
+        """Return availability only when both Blender and the runtime script exist."""
         return ToolStatus.AVAILABLE if find_blender() and _RUNTIME_SCRIPT.is_file() else ToolStatus.UNAVAILABLE
 
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
+        """Estimate render wall time conservatively from requested frame count."""
         if inputs.get("operation") == "render_animation":
             return float(inputs.get("duration_seconds", 60)) * float(inputs.get("fps", 30)) * 2.0
         return 30.0
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
+        """Build or render a Blender world and verify the expected artifacts exist."""
         blender = find_blender()
         if not blender:
             return ToolResult(success=False, error="Blender not found. " + self.install_instructions)
@@ -139,11 +144,12 @@ class BlenderWorld(BaseTool):
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             ok = process.returncode == 0 and "OPENMONTAGE_BLENDER=" in process.stdout
+            version_line = next((line for line in process.stdout.splitlines() if line.startswith("OPENMONTAGE_BLENDER=")), "")
             return ToolResult(
                 success=ok,
-                data={"blender_path": str(blender), "version_line": next((line for line in process.stdout.splitlines() if line.startswith("OPENMONTAGE_BLENDER=")), "")},
+                data={"blender_path": str(blender), "version_line": version_line},
                 error=None if ok else (process.stderr or process.stdout)[-1000:],
-                model="blender-4.5-lts",
+                model="blender-local",
             )
 
         if operation not in {"build", "render_still", "render_animation"}:
@@ -192,7 +198,8 @@ class BlenderWorld(BaseTool):
                         "start_frame": requested_start,
                         "end_frame": requested_end,
                     },
-                    model="blender-4.5-lts-eevee-next",
+                    artifacts=[str(Path(str(output_raw)).expanduser().resolve().parent)],
+                    model="blender-eevee",
                 )
             effective_start = missing
         if inputs.get("start_frame") is not None or operation == "render_animation":
@@ -201,8 +208,9 @@ class BlenderWorld(BaseTool):
             command.extend(["--end-frame", str(requested_end)])
         if inputs.get("frame") is not None:
             command.extend(["--frame", str(int(inputs["frame"]))])
-        if output_raw:
-            command.extend(["--output", str(Path(str(output_raw)).expanduser().resolve())])
+        resolved_output = Path(str(output_raw)).expanduser().resolve() if output_raw else None
+        if resolved_output is not None:
+            command.extend(["--output", str(resolved_output)])
 
         started = time.time()
         try:
@@ -210,18 +218,56 @@ class BlenderWorld(BaseTool):
                 command, capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=max(120, int(self.estimate_runtime(inputs) * 2.5)),
             )
+        except subprocess.TimeoutExpired as exc:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Blender world operation timed out after {exc.timeout}s. "
+                    "For image sequences, rerun with resume=true. "
+                    f"Last output: {(exc.stderr or exc.stdout or '')[-1500:]}"
+                ),
+            )
         except Exception as exc:
             return ToolResult(success=False, error=f"Blender invocation failed: {exc}")
-        if process.returncode != 0:
-            return ToolResult(success=False, error="Blender world build failed: " + (process.stderr or process.stdout)[-3000:])
+
+        combined_output = "\n".join(part for part in (process.stdout, process.stderr) if part)
+        runtime_marker = "OPENMONTAGE_WORLD_REPORT=" in process.stdout
+        if (
+            process.returncode != 0
+            or "Traceback (most recent call last):" in combined_output
+            or not runtime_marker
+        ):
+            return ToolResult(success=False, error="Blender world operation failed: " + combined_output[-4000:])
+        if not blend_path.is_file():
+            return ToolResult(
+                success=False,
+                error=f"Blender completed without writing the expected blend file: {blend_path}\n{combined_output[-2000:]}",
+            )
+
+        if operation == "render_still" and resolved_output is not None and not resolved_output.is_file():
+            return ToolResult(
+                success=False,
+                error=f"Blender completed without writing the expected still image: {resolved_output}",
+            )
+        if operation == "render_animation" and resolved_output is not None:
+            last_frame = resolved_output.parent / f"{resolved_output.name}{requested_end:04d}.png"
+            if not last_frame.is_file():
+                next_missing = first_missing_frame(resolved_output, requested_start, requested_end)
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"Blender exited without producing the requested final frame: {last_frame}. "
+                        f"Next missing frame is {next_missing}; rerun with resume=true."
+                    ),
+                )
 
         artifacts = [str(spec_path), str(blend_path)]
-        if output_raw:
-            output = Path(str(output_raw)).expanduser().resolve()
-            if output.exists():
-                artifacts.append(str(output))
+        if operation == "render_still" and resolved_output is not None:
+            artifacts.append(str(resolved_output))
+        elif operation == "render_animation" and resolved_output is not None:
+            artifacts.append(str(resolved_output.parent))
         report_path = blend_path.with_suffix(".report.json")
-        if report_path.exists():
+        if report_path.is_file():
             artifacts.append(str(report_path))
         return ToolResult(
             success=True,
@@ -237,5 +283,5 @@ class BlenderWorld(BaseTool):
             artifacts=artifacts,
             duration_seconds=round(time.time() - started, 2),
             seed=inputs["world_spec"].get("seed"),
-            model="blender-4.5-lts-eevee-next",
+            model="blender-eevee",
         )
