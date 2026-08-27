@@ -1,11 +1,10 @@
 name: cat-tv
-version: "0.2"
+version: "0.3"
 description: >
   Deterministic long-form Cat TV pipeline. Generates renderer-neutral prey motion,
-  builds a reusable Blender environment, applies motion to a licensed prey mesh,
-  renders sample-first resumable PNG sequences, validates representative frames,
-  and composes long-form outputs without depending on paid generative-video APIs
-  for the core footage.
+  builds and polishes one reusable Blender environment, renders sample-first
+  resumable PNG sequences, validates representative frames, and composes long-form
+  outputs without depending on paid generative-video APIs for the core footage.
 category: animation
 stability: beta
 default_checkpoint_policy: guided
@@ -66,6 +65,7 @@ stages:
       - A 10-15 second sample is planned before long-form rendering
       - Productions longer than 600 seconds are segmented for rendering and stitching
       - Local long renders favor 120-300 second segments for cheap recovery, while 600 seconds remains the hard per-plan limit
+      - One polished environment seed is reused across all segments while prey motion seeds vary
     success_criteria:
       - Schema-valid proposal_packet
       - Approval recorded before asset generation
@@ -77,6 +77,7 @@ stages:
         tools_available:
           - cat_prey_motion
           - blender_world
+          - cat_tv_world_polish
           - cat_prey_blender
           - video_compose
           - frame_sampler
@@ -86,6 +87,7 @@ stages:
           - Motion contains pauses, bursts, hiding, exits, and re-entry without flicker
           - Camera framing works at final aspect ratio
           - Terrain edges and obvious procedural artifacts are absent
+          - Polished world remains visually stable when prey seed changes
 
   - name: scene_plan
     skill: pipelines/animation/scene-director
@@ -100,7 +102,8 @@ stages:
       - Timeline is expressed as continuous hunt beats rather than rapid editorial cuts
       - Fixed or stable camera is the default
       - Seed strategy is explicit for every render segment
-      - Segment boundaries occur at safe beats such as edge exits, hidden prey, or calm holds
+      - Environment seed is fixed for a production/world chapter
+      - Segment boundaries occur at safe beats such as edge exits, hidden prey, or calm holds when practical
     success_criteria:
       - Schema-valid scene_plan
 
@@ -119,6 +122,7 @@ stages:
     tools_available:
       - cat_prey_motion
       - blender_world
+      - cat_tv_world_polish
       - cat_prey_blender
       - threejs_asset_catalog
       - atlas_3d
@@ -128,12 +132,13 @@ stages:
     review_focus:
       - Motion plan is persisted with seed and configuration
       - Prey mesh license/source is recorded
+      - Base world is polished once and retained as an editable blend artifact
       - Blender world and prey scale are reviewed in a short sample
       - No unsupported prey type is silently substituted
     success_criteria:
       - Schema-valid asset_manifest
       - All referenced local assets exist
-      - Motion plan and editable blend project are retained
+      - Motion plans and editable blend projects are retained
 
   - name: edit
     skill: pipelines/animation/edit-director
@@ -150,6 +155,7 @@ stages:
       - Segment boundaries do not create obvious repetitive loops
       - Narration, text, and music remain disabled unless explicitly approved
       - Resolution and fps stay identical across all segments
+      - Natural ambience, when used, is continuous across segment joins
     success_criteria:
       - Schema-valid edit_decisions
 
@@ -183,11 +189,12 @@ stages:
     human_approval_default: false
     review_focus:
       - Blender PNG sequences are resumable and complete before encoding
+      - Every segment passes mechanical probe validation before stitching
       - Final output passes ffprobe/composition validation
       - Representative frames from the beginning, middle, end, and segment joins pass visual review
       - No strobing, full-frame flashing, clipping, terrain-edge exposure, or broken visibility transitions are present
       - Audio, when present, is subtle and does not introduce narration by default
-      - Long-form segments stitch without frame-size, fps, or color-space mismatches
+      - Long-form segments stitch without frame-size, fps, codec, or color-space mismatches
     success_criteria:
       - Schema-valid render_report
       - Output exists and self-review is completed
@@ -208,5 +215,6 @@ stages:
       - Metadata accurately describes prey/environment/duration
       - Thumbnail represents the actual rendered environment
       - Delivery encode is derived from a retained high-quality master
+      - Human-facing CatFactory branding stays outside the continuous Cat TV stimulus unless explicitly approved
     success_criteria:
       - Schema-valid publish_log
