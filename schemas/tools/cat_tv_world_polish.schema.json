@@ -12,7 +12,11 @@
     "extension_size": {"type": "number", "minimum": 40, "default": 100},
     "leaf_count": {"type": "integer", "minimum": 0, "maximum": 600, "default": 180},
     "twig_count": {"type": "integer", "minimum": 0, "maximum": 200, "default": 28},
-    "stone_count": {"type": "integer", "minimum": 0, "maximum": 100, "default": 14}
+    "stone_count": {"type": "integer", "minimum": 0, "maximum": 100, "default": 14},
+    "surface_asset_path": {"type": "string"},
+    "surface_target_size": {"type": "number", "exclusiveMinimum": 0, "default": 14},
+    "surface_z_offset": {"type": "number", "default": 0.02},
+    "surface_rotation_degrees": {"type": "number", "default": 0}
   },
   "allOf": [
     {
