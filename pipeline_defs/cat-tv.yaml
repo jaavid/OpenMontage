@@ -1,0 +1,220 @@
+name: cat-tv
+version: "0.3"
+description: >
+  Deterministic long-form Cat TV pipeline. Generates renderer-neutral prey motion,
+  builds and polishes one reusable Blender environment, renders sample-first
+  resumable PNG sequences, validates representative frames, and composes long-form
+  outputs without depending on paid generative-video APIs for the core footage.
+category: animation
+stability: beta
+default_checkpoint_policy: guided
+
+reference_input:
+  supported: true
+  analysis_depth: standard
+  analysis_tools:
+    - video_analyzer
+    - scene_detect
+    - frame_sampler
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: true
+  custom_skills: true
+  custom_tools: false
+
+required_skills:
+  - creative/cat-tv-production
+  - pipelines/animation/executive-producer
+  - pipelines/animation/proposal-director
+  - pipelines/animation/scene-director
+  - pipelines/animation/asset-director
+  - pipelines/animation/edit-director
+  - pipelines/animation/compose-director
+  - pipelines/animation/publish-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/animation/executive-producer
+  budget_default_usd: 0.00
+  max_revisions_per_stage: 3
+  max_send_backs: 3
+  max_wall_time_minutes: 180
+
+compatible_playbooks:
+  recommended:
+    - clean-professional
+  also_works:
+    - minimalist-diagram
+  custom_allowed: true
+
+stages:
+  - name: proposal
+    skill: pipelines/animation/proposal-director
+    produces:
+      - proposal_packet
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Prey type, environment, duration, resolution, fps, and camera policy are explicit
+      - Procedural Blender route is preferred over paid video generation for core footage
+      - A 10-15 second sample is planned before long-form rendering
+      - Productions longer than 600 seconds are segmented for rendering and stitching
+      - Local long renders favor 120-300 second segments for cheap recovery, while 600 seconds remains the hard per-plan limit
+      - One polished environment seed is reused across all segments while prey motion seeds vary
+    success_criteria:
+      - Schema-valid proposal_packet
+      - Approval recorded before asset generation
+    sub_stages:
+      - name: sample
+        description: "10-15 second Cat TV motion and render proof"
+        condition: "approved_concept_exists"
+        human_approval_default: true
+        tools_available:
+          - cat_prey_motion
+          - blender_world
+          - cat_tv_world_polish
+          - cat_prey_blender
+          - video_compose
+          - frame_sampler
+          - visual_qa
+        review_focus:
+          - Prey remains trackable and correctly grounded
+          - Motion contains pauses, bursts, hiding, exits, and re-entry without flicker
+          - Camera framing works at final aspect ratio
+          - Terrain edges and obvious procedural artifacts are absent
+          - Polished world remains visually stable when prey seed changes
+
+  - name: scene_plan
+    skill: pipelines/animation/scene-director
+    required_artifacts_in:
+      - proposal_packet
+    produces:
+      - scene_plan
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Timeline is expressed as continuous hunt beats rather than rapid editorial cuts
+      - Fixed or stable camera is the default
+      - Seed strategy is explicit for every render segment
+      - Environment seed is fixed for a production/world chapter
+      - Segment boundaries occur at safe beats such as edge exits, hidden prey, or calm holds when practical
+    success_criteria:
+      - Schema-valid scene_plan
+
+  - name: assets
+    skill: pipelines/animation/asset-director
+    required_artifacts_in:
+      - scene_plan
+    optional_artifacts_in:
+      - proposal_packet
+    produces:
+      - asset_manifest
+    optional_tools:
+      - threejs_asset_catalog
+      - atlas_3d
+      - fal_3d
+    tools_available:
+      - cat_prey_motion
+      - blender_world
+      - cat_tv_world_polish
+      - cat_prey_blender
+      - threejs_asset_catalog
+      - atlas_3d
+      - fal_3d
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Motion plan is persisted with seed and configuration
+      - Prey mesh license/source is recorded
+      - Base world is polished once and retained as an editable blend artifact
+      - Blender world and prey scale are reviewed in a short sample
+      - No unsupported prey type is silently substituted
+    success_criteria:
+      - Schema-valid asset_manifest
+      - All referenced local assets exist
+      - Motion plans and editable blend projects are retained
+
+  - name: edit
+    skill: pipelines/animation/edit-director
+    required_artifacts_in:
+      - scene_plan
+      - asset_manifest
+    produces:
+      - edit_decisions
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Seed and approved motion timings are preserved
+      - Segment boundaries do not create obvious repetitive loops
+      - Narration, text, and music remain disabled unless explicitly approved
+      - Resolution and fps stay identical across all segments
+      - Natural ambience, when used, is continuous across segment joins
+    success_criteria:
+      - Schema-valid edit_decisions
+
+  - name: compose
+    skill: pipelines/animation/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    optional_artifacts_in:
+      - scene_plan
+    produces:
+      - render_report
+      - final_review
+    required_tools:
+      - video_compose
+    optional_tools:
+      - audio_mixer
+      - video_stitch
+      - frame_sampler
+      - visual_qa
+      - composition_validator
+    tools_available:
+      - cat_prey_blender
+      - video_compose
+      - audio_mixer
+      - video_stitch
+      - frame_sampler
+      - visual_qa
+      - composition_validator
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Blender PNG sequences are resumable and complete before encoding
+      - Every segment passes mechanical probe validation before stitching
+      - Final output passes ffprobe/composition validation
+      - Representative frames from the beginning, middle, end, and segment joins pass visual review
+      - No strobing, full-frame flashing, clipping, terrain-edge exposure, or broken visibility transitions are present
+      - Audio, when present, is subtle and does not introduce narration by default
+      - Long-form segments stitch without frame-size, fps, codec, or color-space mismatches
+    success_criteria:
+      - Schema-valid render_report
+      - Output exists and self-review is completed
+
+  - name: publish
+    skill: pipelines/animation/publish-director
+    required_artifacts_in:
+      - render_report
+      - final_review
+    optional_artifacts_in:
+      - proposal_packet
+    produces:
+      - publish_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Metadata accurately describes prey/environment/duration
+      - Thumbnail represents the actual rendered environment
+      - Delivery encode is derived from a retained high-quality master
+      - Human-facing CatFactory branding stays outside the continuous Cat TV stimulus unless explicitly approved
+    success_criteria:
+      - Schema-valid publish_log

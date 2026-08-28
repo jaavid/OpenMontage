@@ -1,0 +1,106 @@
+{
+  "name": "mouse-hunt-60s",
+  "pipeline": "cat-tv",
+  "description": "Production-oriented 60-second Cat TV mouse hunt with a reusable polished forest floor, lower-TV play zone, corrected prey heading, seeded behavior, and resumable rendering.",
+  "motion": {
+    "operation": "generate",
+    "prey_type": "mouse",
+    "duration_seconds": 60,
+    "fps": 60,
+    "seed": 184321,
+    "bounds": [-4.2, 4.2, -3.2, 0.3],
+    "z_offset": 0.025,
+    "output_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json"
+  },
+  "world": {
+    "operation": "build",
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "duration_seconds": 60,
+    "blend_path": "projects/cat-tv/mouse-hunt-60s/base.blend",
+    "world_spec": {
+      "seed": 184321,
+      "fps": 60,
+      "terrain": {
+        "size": 64,
+        "resolution": 220,
+        "height_scale": 0.10,
+        "frequency": 0.038,
+        "palette": [
+          [0.19, 0.27, 0.10, 1.0],
+          [0.25, 0.31, 0.12, 1.0],
+          [0.27, 0.21, 0.10, 1.0]
+        ]
+      },
+      "camera": {
+        "position": [0.0, -10.8, 4.25],
+        "target": [0.0, 1.25, 0.08],
+        "lens": 50
+      },
+      "lighting": {
+        "sun_energy": 2.15,
+        "sun_angle_degrees": 38,
+        "sun_rotation_degrees": [38, -22, -30],
+        "fill_energy": 720,
+        "world_color": [0.18, 0.245, 0.095, 1],
+        "world_strength": 0.42
+      }
+    }
+  },
+  "world_polish": {
+    "operation": "polish",
+    "base_blend_path": "projects/cat-tv/mouse-hunt-60s/base.blend",
+    "blend_path": "projects/cat-tv/mouse-hunt-60s/base-polished.blend",
+    "seed": 184321,
+    "extension_size": 110,
+    "leaf_count": 48,
+    "twig_count": 10,
+    "stone_count": 6,
+    "surface_target_size": 14,
+    "surface_z_offset": 0.025,
+    "surface_rotation_degrees": 0
+  },
+  "prey_render": {
+    "operation": "render_animation",
+    "base_blend_path": "projects/cat-tv/mouse-hunt-60s/base-polished.blend",
+    "asset_path": "${MOUSE_GLB_PATH}",
+    "motion_plan_path": "projects/cat-tv/mouse-hunt-60s/mouse.motion.json",
+    "blend_path": "projects/cat-tv/mouse-hunt-60s/mouse-hunt.blend",
+    "output_path": "projects/cat-tv/mouse-hunt-60s/frames/frame-",
+    "target_height": 0.34,
+    "heading_offset_degrees": 180,
+    "fps": 60,
+    "start_frame": 1,
+    "end_frame": 3600,
+    "resume": true,
+    "seconds_per_frame_budget": 8.0,
+    "decorate_world": false
+  },
+  "sample_policy": {
+    "required": true,
+    "duration_seconds": 12,
+    "review": [
+      "prey faces the direction of travel rather than appearing to reverse",
+      "prey spends most of its visible time in the lower TV play zone where a cat can reach it",
+      "prey occupies a clearly trackable portion of the frame",
+      "prey scale and ground contact",
+      "body motion reduces the sliding impression without excessive bouncing",
+      "visibility transitions",
+      "camera framing has no visible terrain edge or horizon break",
+      "motion variety",
+      "external forest-floor detail reads naturally and remains stable between segments",
+      "background contrast without visual clutter",
+      "absence of flicker or clipping"
+    ]
+  },
+  "delivery": {
+    "segment_seconds": 300,
+    "video_codec": "libx264",
+    "crf": 16,
+    "preset": "slow",
+    "pixel_format": "yuv420p",
+    "stitch_transition": "cut",
+    "audio_policy": "subtle natural ambience only; no narration, text, or music by default"
+  }
+}
